@@ -1,75 +1,48 @@
-from databuilder.ehrql import Dataset, days, case, when
-from databuilder.tables.beta.tpp import (
-  patients,
-  practice_registrations,
-  clinical_events,
-  sgss_covid_all_tests,
-  hospital_admissions
-)
-
-from variable_lib import (
-  long_covid_events_during,
-  long_covid_dx_during
-)
-
-from datasets import (
-    add_common_variables,
-    study_start_date,
-    study_end_date,
-    covid_to_longcovid_lag
-)
-
-import datetime
-import codelists
-
-
-dataset = Dataset()
-
-lc_code_any = long_covid_events_during(study_start_date, study_end_date)
-lc_dx_code = long_covid_dx_during(study_start_date, study_end_date)
-
-# Long COVID codes
-first_lc_code_any = lc_code_any.sort_by(lc_code_any.date).first_for_patient()
-first_lc_dx_code = lc_dx_code.sort_by(lc_dx_code.date).first_for_patient()
-
-# use the record of a patient's long covid on Dx (even if they had a Rx earlier)
-first_lc_code = Dataset()
-first_lc_code.has_dx = first_lc_dx_code.exists_for_patient()
-
-first_lc_code.best_date = case(
-    when(first_lc_code.has_dx & first_lc_dx_code.date.is_after(first_lc_code_any.date)).then(first_lc_dx_code.date),
-    when(first_lc_code.has_dx & first_lc_dx_code.date.is_on_or_before(first_lc_code_any.date)).then(first_lc_code_any.date),
-    when(~first_lc_code.has_dx).then(first_lc_code_any.date)
-)
-first_lc_code.best_code = case(
-    when(first_lc_code.has_dx & first_lc_dx_code.date.is_after(first_lc_code_any.date)).then(first_lc_dx_code.snomedct_code),
-    when(first_lc_code.has_dx & first_lc_dx_code.date.is_on_or_before(first_lc_code_any.date)).then(first_lc_code_any.snomedct_code),
-    when(~first_lc_code.has_dx).then(first_lc_code_any.snomedct_code)
-)
-
-# create flag about whether this is a diagnosis or a referral code
-# default = NULL
-lc_dx_flag = case(
-  when(first_lc_code.best_code.is_in(codelists.long_covid_dx_codes)).then("Dx"),
-  when(first_lc_code.best_code.is_in(codelists.long_covid_assessment_codes)).then("Rx"),
-  when(first_lc_code.best_code.is_in(codelists.long_covid_referral_codes)).then("Rx")
-)
-
-add_common_variables(dataset, study_start_date, first_lc_code.best_date, population=lc_code_any.exists_for_patient())
-
-# add specific variables
-dataset.first_lc = first_lc_code.best_date
-dataset.first_lc_code = first_lc_code.best_code
-dataset.test_to_lc_gap = (first_lc_code.best_date - dataset.latest_test_before_diagnosis).days
-
-dataset.first_lc_dx = first_lc_dx_code.date
-dataset.lc_dx_flag = lc_dx_flag
-
-# create new outcome variable for lc_dx depending on previous covid test/hospitatlisation
-dataset.longcovid_categorical = case(
-    when(dataset.first_lc_dx.is_after(dataset.first_covid_hosp + days(covid_to_longcovid_lag)) & dataset.first_covid_critical).then("LC post-critical COVID hospitalisation"),
-    when(dataset.first_lc_dx.is_after(dataset.first_covid_hosp + days(covid_to_longcovid_lag))).then("LC post-COVID hospitalisation"),
-    when(dataset.first_lc_dx.is_after(dataset.latest_primarycare_covid + days(covid_to_longcovid_lag))).then("LC post-primary care COVID"),
-    when(dataset.first_lc_dx.is_after(dataset.latest_test_before_diagnosis + days(covid_to_longcovid_lag))).then("LC post-positive test"),
-    when(dataset.first_lc_dx.is_after(dataset.pt_start_date)).then("LC only")
-)
+from ehrql import create_dataset
+from ehrql.tables.tpp import patients, practice_registrations
+
+# import variable definitions
+from variables_function import *
+
+#Import codelists
+from codelists import *
+
+# initialise dataset
+dataset = create_dataset()
+
+# Choose an index date
+index_date = "2020-12-08"
+
+#Dummy data
+dataset.configure_dummy_data(population_size=1000)
+
+# define dataset population
+dataset.define_population(
+  practice_registrations.for_patient_on(index_date).exists_for_patient() &
+  ((patients.date_of_death> index_date) | patients.date_of_death.is_null())
+)
+
+# Example 1: Add specific PRIMIS variables
+
+dataset.immunosuppressed = is_immunosuppressed(index_date) #immunosuppress grouped
+dataset.ckd = has_ckd(index_date) #chronic kidney disease
+dataset.crd = has_crd(index_date) # chronis respratory disease
+dataset.diabetes = has_diabetes(index_date) #diabetes
+dataset.cld = has_prior_event(cld, index_date) # chronic liver disease
+dataset.chd = has_prior_event(chd_cov, index_date) #chronic heart disease
+dataset.cns = has_prior_event(cns_cov, index_date) # chronic neurological disease
+dataset.asplenia = has_prior_event(spln_cov, index_date) # asplenia or dysfunction of the Spleen
+dataset.learndis = has_prior_event(learndis, index_date) # learning Disability
+dataset.smi = has_smi(index_date) #severe mental illness
+dataset.severe_obesity = has_severe_obesity(index_date) #immunosuppress grouped
+
+# Example 2: add the single PRIMIS "at risk" variable
+
+dataset.primis_atrisk = primis_atrisk(index_date) # at risk (at least one of the conditions above)
+
+# EXAMPLE 3: alternatively, use the `primis_variables` function to add variables programmatically:
+
+for i in range(0, 2):
+  suffix = f"_{i}"
+  primis_variables(dataset = dataset, index_date = index_date+years(i), var_name_suffix = suffix)
+

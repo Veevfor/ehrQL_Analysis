@@ -1,89 +1,101 @@
-from argparse import ArgumentParser
+from ehrql import create_dataset, months, days
+from ehrql.tables.tpp import patients, clinical_events
 
-from ehrql import INTERVAL, Measures, months
-from ehrql.tables.tpp import patients
+from datetime import date
 
-from dm_dataset import (
-    make_dm_dataset,
-    get_registration_status,
-    get_dm_reg_r1,
-    get_dm_reg_r2,
-    get_dm021_r1,
-    get_dm021_r2,
-    get_dm021_r3,
-    get_dm021_r4,
-    get_dm021_r5,
-    get_dm021_r6,
-    get_dm021_r7,
-    get_dm021_r8,
-    get_dm021_r9,
-    get_dm021_r10,
+from codelists import pharmacy_first_clinical_pathways_cod
+
+dataset = create_dataset()
+dataset.configure_dummy_data(population_size=1000)
+
+dataset.define_population(patients.exists_for_patient())
+
+# Dictionary of pharmacy first codes
+pharmacy_first_events_dict = {
+    # Community Pharmacist (CP) Consultation Service for minor illness (procedure)
+    "comm_pharm_consultation_service": ["1577041000000109"],
+    # Pharmacy First service (qualifier value)
+    "pharm_first_service": ["983341000000102"],
+}
+
+pharmacy_first_event_codes = [
+    code for codelist in pharmacy_first_events_dict.values() for code in codelist
+]
+
+# https://www.england.nhs.uk/primary-care/pharmacy/pharmacy-first/
+# For further projects we should review if choosing the actual start date
+# will give us the most accurate cut-off in OpenSAFELY
+pharmacy_first_launch_date = date(2024, 2, 1)
+
+# Time interval for selecting medications pre and post Pharmacy First launch date
+time_interval = months(6)
+
+pharmacy_first_ids = clinical_events.where(
+    clinical_events.snomedct_code.is_in(pharmacy_first_event_codes)
+).consultation_id
+
+pharmacy_first_dates = clinical_events.where(
+    clinical_events.snomedct_code.is_in(pharmacy_first_event_codes)
+).date
+
+# Select clinical events pre and post PF launch date
+selected_all_events_pre = clinical_events.where(
+    clinical_events.date.is_on_or_between(
+        pharmacy_first_launch_date - time_interval,
+        pharmacy_first_launch_date - days(1),
+    )
+).sort_by(clinical_events.date)
+
+selected_pfid_events_pre = selected_all_events_pre.where(
+    clinical_events.consultation_id.is_in(pharmacy_first_ids)
 )
 
-# Define index date and cutoff value for clinical rules
-parser = ArgumentParser()
-parser.add_argument("--ifcchba-cutoff-val", type=int)
-args = parser.parse_args()
-ifcchba_cutoff_val = args.ifcchba_cutoff_val
-
-index_date = INTERVAL.start_date
-
-# Instantiate dataset and define clinical variables
-dataset = make_dm_dataset(index_date=index_date)
-
-# Define registration status
-# NOTE: this is not identical to GMS registration status
-has_registration = get_registration_status(index_date)
-
-# Define diabetes register (DM_REG) rules:
-dataset.dm_reg_r1 = get_dm_reg_r1(dataset)
-dataset.dm_reg_r2 = get_dm_reg_r2(dataset)
-
-# Define diabetes indicator DM021 rules:
-dataset.dm021_r1 = get_dm021_r1(dataset)
-dataset.dm021_r2 = get_dm021_r2(dataset, index_date, ifcchba_cutoff_val)
-dataset.dm021_r3 = get_dm021_r3(dataset, index_date)
-dataset.dm021_r4 = get_dm021_r4(dataset, index_date)
-dataset.dm021_r5 = get_dm021_r5(dataset, index_date)
-dataset.dm021_r6 = get_dm021_r6(dataset, index_date)
-dataset.dm021_r7 = get_dm021_r7(dataset, index_date)
-dataset.dm021_r8 = get_dm021_r8(dataset, index_date, ifcchba_cutoff_val)
-dataset.dm021_r9 = get_dm021_r9(dataset, index_date)
-dataset.dm021_r10 = get_dm021_r10(dataset, index_date)
-
-# Define select action for DM_REG
-has_dm_reg_select_r2 = dataset.dm_reg_r1 & ~dataset.dm_reg_r2
-
-# Define first select action for DM021 (Rule 2)
-has_dm021_select_r2 = ~dataset.dm021_r1 & dataset.dm021_r2
-
-# Define second select action for DM021 (Rule 10)
-has_dm021_select_r10 = (
-    ~dataset.dm021_r1
-    & ~dataset.dm021_r2
-    & ~dataset.dm021_r3
-    & ~dataset.dm021_r4
-    & ~dataset.dm021_r5
-    & ~dataset.dm021_r6
-    & ~dataset.dm021_r7
-    & ~dataset.dm021_r8
-    & ~dataset.dm021_r9
-    & ~dataset.dm021_r10
+selected_pfdate_events_pre = selected_all_events_pre.where(
+    clinical_events.date.is_in(pharmacy_first_dates)
 )
 
-# Define DM021 numerator and denominator
-# DM021 gets applied to DM_REG (has_dm_reg_select_r2)
-# The numerator is applied to the patients selected into the denominator
-dm021_numerator = has_dm021_select_r2
-dm021_denominator = has_dm_reg_select_r2 & (has_dm021_select_r2 | has_dm021_select_r10)
+selected_all_events_post = clinical_events.where(
+    clinical_events.date.is_on_or_between(
+        pharmacy_first_launch_date, pharmacy_first_launch_date + time_interval
+    )
+).sort_by(clinical_events.date)
 
-# Define measures
-measures = Measures()
-
-measures.define_measure(
-    name="dm021",
-    numerator=dm021_numerator,
-    denominator=dm021_denominator,
-    group_by={"sex": patients.sex},
-    intervals=months(12).starting_on("2022-03-01"),
+selected_pfid_events_post = selected_all_events_post.where(
+    clinical_events.consultation_id.is_in(pharmacy_first_ids)
 )
+
+selected_pfdate_events_post = selected_all_events_post.where(
+    clinical_events.date.is_in(pharmacy_first_dates)
+)
+
+selected_events_dict = {
+    "pre_all": selected_all_events_pre,
+    "pre_pfid": selected_pfid_events_pre,
+    "pre_pfdate": selected_pfdate_events_pre,
+    "post_all": selected_all_events_post,
+    "post_pfid": selected_pfid_events_post,
+    "post_pfdate": selected_pfdate_events_post,
+}
+
+pf_codelists_dict = {
+    "pf_events": pharmacy_first_event_codes,
+    "pf_pathways": pharmacy_first_clinical_pathways_cod,
+}
+
+# Count distinct pharmacy first consultations per patient
+for time_interval_desc, selected_events in selected_events_dict.items():
+    count_distinct_consultations_query = (
+        selected_events.consultation_id.count_distinct_for_patient()
+    )
+    dataset.add_column(
+        f"{time_interval_desc}_count_distinct_ids",
+        count_distinct_consultations_query,
+    )
+
+# Count pharmacy first codes
+for code_desc, code in pf_codelists_dict.items():
+    for time_interval_desc, selected_events in selected_events_dict.items():
+        count_codes_query = selected_events.where(
+            selected_events.snomedct_code.is_in(code)
+        ).count_for_patient()
+        dataset.add_column(f"{time_interval_desc}_count_{code_desc}", count_codes_query)

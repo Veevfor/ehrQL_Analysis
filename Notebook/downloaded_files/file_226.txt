@@ -1,53 +1,97 @@
-import json, sys
-from pathlib import Path 
+from ehrql import codelist_from_csv, create_dataset, years
+from ehrql.tables.core import clinical_events, medications, patients
+from ehrql.tables.tpp import addresses, practice_registrations
 
-from datetime import date, datetime
-from ehrql import Dataset, years
-from ehrql.tables import table_from_file, PatientFrame, Series
-from ehrql.tables.tpp import practice_registrations
-
-from variable_lib import has_a_continuous_practice_registration_spanning
-
-dataset = Dataset()
-
-#######################################################################################
-# Import study dates defined in "./analysis/design/study-dates.R" script and then exported
-# to JSON
-#######################################################################################
-study_dates = json.loads(
-  Path("analysis/design/study-dates.json").read_text(),
+chronic_cardiac_disease_codes = codelist_from_csv(
+    "codelists/opensafely-chronic-cardiac-disease-snomed.csv", column="id"
 )
-
-args = sys.argv
-
-# Change these in ./analysis/design/study-dates.R if necessary
-study_start_date = datetime.strptime(study_dates[args[2]], "%Y-%m-%d").date()
-study_end_date = datetime.strptime(study_dates[args[3]], "%Y-%m-%d").date()
-
-#define dataset definition settings from command line arguments
-start_year = study_start_date.year
-end_year = study_end_date.year
-
-#tell ehrql to use patients from process file
-@table_from_file(f"output/flow_chart/cohort_mothers_processed_{start_year}_{end_year}.arrow")
-
-#extract these patients where index date is the date of birth of the linked infant
-class matched_patients(PatientFrame) :
-  index_date = Series(date)
-
-##define populations
-registered_mothers = (
-  practice_registrations.for_patient_on(matched_patients.index_date).exists_for_patient()
+chronic_liver_disease_codes = codelist_from_csv(
+    "codelists/opensafely-chronic-liver-disease-snomed.csv", column="id"
 )
+salbutamol_codes = codelist_from_csv(
+    "codelists/opensafely-asthma-inhaler-salbutamol-medication.csv", column="id"
+)
+# Systolic arterial pressure. Corresponds to CTV3 "2469."
+systolic_blood_pressure_codes = ["72313002"]
+# Diastolic arterial pressure. Corresponds to CTV3 "246A."
+diastolic_blood_pressure_codes = ["1091811000000102"]
 
-#extract mothers whose patient id matches those who were extracted with infants
+index_date = "2020-02-01"
+
+dataset = create_dataset()
+
 dataset.define_population(
-  registered_mothers
+    practice_registrations.spanning(
+        index_date - years(1), index_date
+    ).exists_for_patient()
 )
 
-#mothers registration for 1 year prior to index date
-dataset.mother_registered = (
-  has_a_continuous_practice_registration_spanning(
-    matched_patients.index_date - years(1), matched_patients.index_date
-  )
+# https://github.com/opensafely/risk-factors-research/issues/49
+dataset.age = patients.age_on(index_date)
+
+# https://github.com/opensafely/risk-factors-research/issues/46
+dataset.sex = patients.sex
+
+dataset.chronic_cardiac_disease = (
+    clinical_events.where(
+        clinical_events.snomedct_code.is_in(chronic_cardiac_disease_codes)
+    )
+    .sort_by(clinical_events.date)
+    .first_for_patient()
+    .date
+)
+
+dataset.chronic_liver_disease = (
+    clinical_events.where(
+        clinical_events.snomedct_code.is_in(chronic_liver_disease_codes)
+    )
+    .sort_by(clinical_events.date)
+    .first_for_patient()
+    .date
+)
+
+# https://github.com/opensafely/risk-factors-research/issues/48
+bp_sys_clinical_events = clinical_events.where(
+    clinical_events.snomedct_code.is_in(systolic_blood_pressure_codes)
+)
+date_of_most_recent_bp_sys_clinical_event = (
+    bp_sys_clinical_events.where(clinical_events.date.is_on_or_before(index_date))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
+)
+dataset.bp_sys = bp_sys_clinical_events.where(
+    clinical_events.date == date_of_most_recent_bp_sys_clinical_event
+).numeric_value.mean_for_patient()
+
+# https://github.com/opensafely/risk-factors-research/issues/48
+bp_dias_clinical_events = clinical_events.where(
+    clinical_events.snomedct_code.is_in(diastolic_blood_pressure_codes)
+)
+date_of_most_recent_bp_dias_clinical_event = (
+    bp_dias_clinical_events.where(clinical_events.date.is_on_or_before(index_date))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
+)
+dataset.bp_dias = bp_dias_clinical_events.where(
+    clinical_events.date == date_of_most_recent_bp_dias_clinical_event
+).numeric_value.mean_for_patient()
+
+# https://github.com/opensafely/risk-factors-research/issues/44
+dataset.stp = practice_registrations.for_patient_on(index_date).practice_stp
+
+# https://github.com/opensafely/risk-factors-research/issues/44
+dataset.msoa = addresses.for_patient_on(index_date).msoa_code
+
+# https://github.com/opensafely/risk-factors-research/issues/45
+dataset.imd = addresses.for_patient_on(index_date).imd_rounded
+
+# https://github.com/opensafely/risk-factors-research/issues/47
+dataset.rural_urban = addresses.for_patient_on(index_date).rural_urban_classification
+
+dataset.recent_salbutamol_count = (
+    medications.where(medications.dmd_code.is_in(salbutamol_codes))
+    .where(medications.date.is_on_or_between(index_date - years(2), index_date))
+    .count_for_patient()
 )

@@ -1,59 +1,26 @@
-from ehrql import codelist_from_csv
+from dataset_definition_cohorts import generate_dataset
 
-acute_otitis_media_tx_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-acute-otitis-media-treatment-dmd.csv",
-    column="code",
-)
+from ehrql.query_language import table_from_file, PatientFrame, Series
 
-impetigo_treatment_tx_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-impetigo-treatment-dmd.csv",
-    column="code",
-)
+from datetime import date
 
-infected_insect_bites_tx_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-infected-insect-bites-treatment-dmd.csv",
-    column="code",
-)
+# extract index dates for unvax cohort from index_dates.csv
 
-shingles_treatment_tx_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-shingles-treatment-dmd.csv",
-    column="code",
-)
+@table_from_file("output/dataset_definition/index_dates.csv.gz")
 
-sinusitis_tx_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-sinusitis-treatment-dmd.csv",
-    column="code",
-)
+class index_dates(PatientFrame):
+    index_unvax        = Series(date)
+    end_unvax_exposure = Series(date)
+    end_unvax_outcome  = Series(date)
 
-sore_throat_tx_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-sore-throat-treatment-dmd.csv",
-    column="code",
-)
+index_date        = index_dates.index_unvax
+end_date_exposure = index_dates.end_unvax_exposure
+end_date_outcome  = index_dates.end_unvax_outcome
 
-urinary_tract_infection_tx_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-urinary-tract-infection-treatment-dmd.csv",
-    column="code",
-)
+# Create dataset
 
-pharmacy_first_clinical_pathways_cod = codelist_from_csv(
-    "codelists/opensafely-pharmacy-first-clinical-pathway-conditions.csv",
-    column="code",
-)
+dataset = generate_dataset(index_date, end_date_exposure, end_date_outcome)
 
-# Combine all medication codelists
-pharmacy_first_med_codes = (
-    acute_otitis_media_tx_cod
-    + impetigo_treatment_tx_cod
-    + infected_insect_bites_tx_cod
-    + shingles_treatment_tx_cod
-    + sinusitis_tx_cod
-    + sore_throat_tx_cod
-    + urinary_tract_infection_tx_cod
-)
-
-pharmacy_first_event_codes = [
-    # Community Pharmacist (CP) Consultation Service for minor illness (procedure)
-    "1577041000000109",
-    # Pharmacy First service (qualifier value)
-    "983341000000102",
-]
+dataset.index_date        = index_date
+dataset.end_date_exposure = end_date_exposure
+dataset.end_date_outcome  = end_date_outcome

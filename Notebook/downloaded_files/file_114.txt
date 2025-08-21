@@ -1,57 +1,38 @@
-import operator
-from functools import reduce
+from enum import Enum
 
-from ehrql.codes import ICD10Code
-from ehrql import case, when
-from ehrql.tables import tpp as schema
+from ehrql.codes import codelist_from_csv
 
 
-def first_matching_event(events, codelist, where=True):
-    return (
-        events.where(where)
-        .where(events.snomedct_code.is_in(codelist))
-        .sort_by(events.date)
-        .first_for_patient()
-    )
+class Codelists(Enum):
+    ACEI = ("pincer-acei", "id")
+    LOOP_DIURETICS = ("pincer-diur", "id")
+    RENAL_FUNCTION = ("pincer-renal", "code")
+    ELECTROLYTES_TEST = ("pincer-electro", "code")
+    METHOTREXATE = ("pincer-met", "id")
+    FULL_BLOOD_COUNT = ("pincer-fbc", "code")
+    LIVER_FUNCTION_TEST = ("pincer-lft", "code")
+    LITHIUM = ("pincer-lith", "id")
+    LITHIUM_LEVEL = ("pincer-lith_lev", "code")
+    AMIODARONE = ("pincer-amio", "id")
+    TFT = ("pincer-tft", "code")
+    ULCER_HEALING_DRUGS = ("pincer-ppi", "id")
+    ORAL_NSAID = ("pincer-nsaid", "id")
+    PEPTIC_ULCER = ("pincer-pep", "code")
+    GI_BLEED = ("pincer-gi_bleed", "code")
+    ANTIPLATELET_EXCL_ASP = ("pincer-non_asp_antiplate", "id")
+    ASPIRIN = ("pincer-aspirin", "id")
+    ANTICOAG = ("pincer-anticoag", "id")
+    ASTHMA = ("pincer-ast", "code")
+    ASTHMA_RESOLVED = ("pincer-ast_res", "code")
+    NSBB = ("pincer-nsbb", "id")
+    HF = ("pincer-hf", "code")
+    EGFR = ("pincer-egfr", "code")
+    ANTIPLATELET_ASP = ("pincer-antiplat", "id")
 
+    def __init__(self, codelist_name: str, column: str) -> None:
+        self.codelist_name = codelist_name
+        self._column = column
+        self.codes = codelist_from_csv(
+            f"codelists/{self.codelist_name}.csv", column=self._column
+        )
 
-def last_matching_event(events, codelist, where=True):
-    return (
-        events.where(where)
-        .where(events.snomedct_code.is_in(codelist))
-        .sort_by(events.date)
-        .last_for_patient()
-    )
-
-
-def age_as_of(date):
-    return (date - schema.patients.date_of_birth).years
-
-
-# TODO this is not exactly the same as died_from_any_cause().
-# Note that this function only checks the patient table
-def died_as_of(date):
-    return schema.patients.date_of_death.is_not_null() & (
-        schema.patients.date_of_death < date
-    )
-
-
-def _registrations_overlapping_period(start_date, end_date):
-    regs = schema.practice_registrations
-    return regs.where(
-        regs.start_date.is_on_or_before(start_date)
-        & (regs.end_date.is_after(end_date) | regs.end_date.is_null())
-    )
-
-
-def practice_registration_as_of(date):
-    regs = _registrations_overlapping_period(date, date)
-    return regs.sort_by(regs.start_date, regs.end_date).first_for_patient()
-
-
-def get_events_on_or_between(events, codelist, start_date, end_date, where=True):
-    return (
-        events.where(where)
-        .where(events.snomedct_code.is_in(codelist))
-        .where(events.date.is_on_or_between(start_date, end_date))
-    )

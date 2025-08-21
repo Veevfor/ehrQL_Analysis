@@ -1,440 +1,268 @@
-import argparse
-import os
+# ehrQL codelists
+from ehrql import codelist_from_csv
 
-from ehrql import INTERVAL, Measures, months, Dataset
-from ehrql.tables.beta.core import clinical_events, medications, patients
-from ehrql.tables.beta.tpp import practice_registrations
-from codelists import Codelists
-from utils import (
-    HistoricalEvent,
-    CoPrescribingVariableGenerator,
-    get_latest_clinical_event,
-    Measure,
-    calculate_num_intervals,
+# DEMOGRAPHIC CODELIST
+ethnicity_codes = codelist_from_csv(
+    "codelists/opensafely-ethnicity-snomed-0removed.csv",
+    column="code",
+    category_column="Grouping_6",
 )
 
-BACKEND = os.getenv("OPENSAFELY_BACKEND", "expectations")
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--start-date", type=str)
-    parser.add_argument("--end-date", type=str)
-    parser.add_argument("--population-size", type=int, default=500)
-    parser.add_argument("--measure", type=str)
-    return parser.parse_args()
-
-args = parse_args()
-
-AS_DATASET = False
-
-if args.start_date and args.end_date:
-    INTERVAL = INTERVAL.__class__(start_date=args.start_date, end_date=args.end_date)
-    AS_DATASET = True
-
-
-dataset = Dataset()
-
-dataset.configure_dummy_dataset(population_size=args.population_size)
-### Population variables and filter
-dataset.age = patients.age_on(date=INTERVAL.start_date)
-registered_practice = practice_registrations.for_patient_on(INTERVAL.start_date)
-dataset.registered_practice_id = registered_practice.practice_pseudo_id
-
-# ### Indicator variables
-
-hist_med = HistoricalEvent("medication", interval=INTERVAL)
-hist_clinical = HistoricalEvent("clinical", interval=INTERVAL)
-
-# ###
-# # GI BLEED INDICATORS
-# # A - 65 or over, no GI protect, NSAID audit (GI_P3A)
-# ###
-
-oral_nsaid = hist_med.fetch(Codelists.ORAL_NSAID.codes, 3)
-dataset.oral_nsaid = oral_nsaid.exists_for_patient()
-
-ppi = hist_med.fetch(Codelists.ULCER_HEALING_DRUGS.codes, 3)
-dataset.ppi = ppi.exists_for_patient()
-
-# ###
-# # GI BLEED INDICATORS
-# # B - Peptic ulcer/GI bleed, no PPI protect, NSAID audit (GI_P3B)
-# ###
-# # ppi from A
-
-peptic_ulcer = hist_clinical.fetch(Codelists.PEPTIC_ULCER.codes, 3)
-dataset.peptic_ulcer = peptic_ulcer.exists_for_patient()
-
-gi_bleed = hist_clinical.fetch(Codelists.GI_BLEED.codes, 3)
-dataset.gi_bleed = gi_bleed.exists_for_patient()
-
-# ###
-# # GI BLEED INDICATORS
-# # C - Peptic ulcer/GI bleed, no PPI protect, NSAID audit (GI_P3B)
-# ###
-# # peptic_ulcer from B
-# # gi_bleed from B
-# # ppi from A
-# # antiplatelet_excluding_aspirin from co-prescribing vars
-# # aspirin from co-prescribing vars
-
-
-cp_f = CoPrescribingVariableGenerator(
-    dataset,
-    medications,
-    (Codelists.ASPIRIN.codes, Codelists.ANTIPLATELET_EXCL_ASP.codes),
-    ("aspirin", "antiplatelet_excluding_aspirin"),
-    INTERVAL.start_date,
-    months=3,
+# CLINICAL CONDITIONS CODELISTS
+asthma_diag = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-ast_cod.csv", column="code",
 )
 
-dataset.co_prescribed_aspirin_antiplatelet_excluding_aspirin = (
-    cp_f.generate_co_prescribing_variable()
+asthma_emerg = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-astadmsn_cod.csv", column="code",
 )
 
-# ###
-# # GI BLEED INDICATORS
-# # D – Warfarin/NOACS and NSAID audit (GI_P3D)
-# ###
-# # anticoagulant from co-prescribing variables
-# # oral_nsaid from A
-
-cp_e = CoPrescribingVariableGenerator(
-    dataset,
-    medications,
-    (Codelists.ANTICOAG.codes, Codelists.ANTIPLATELET_ASP.codes),
-    ("anticoagulant", "antiplatelet_including_aspirin"),
-    INTERVAL.start_date,
+asthma_snomed = (
+    asthma_diag
+    + asthma_emerg
 )
 
-co_prescribed_anticoagulant_antiplatelet_including_aspirin = (
-    cp_e.generate_co_prescribing_variable()
-)
-dataset.co_prescribed_anticoagulant_antiplatelet_including_aspirin = co_prescribed_anticoagulant_antiplatelet_including_aspirin
-
-
-# ###
-# # GI BLEED INDICATORS
-# # E – Anticoagulation & Antiplatelet & No GI Protection Audit (GI_P3E)
-# ###
-# # ppi from A
-# # anticoagulant from co-prescribing variables
-
-
-# ###
-# # GI BLEED INDICATORS
-# # F – Aspirin, antiplatelet and no GI protection audit (GI_P3F)
-# ###
-# # aspirin from co-prescribing vars
-# # ppi from A
-
-
-# ###
-# # OTHER PRESCRIBING INDICATORS
-# # G - Asthma and non-selective betablockers audit (AS_P3G)
-# ###
-
-asthma = hist_clinical.fetch(Codelists.ASTHMA.codes, 3)
-dataset.asthma = asthma.exists_for_patient()
-
-asthma_resolved = hist_clinical.fetch(Codelists.ASTHMA_RESOLVED.codes, ever=True)
-dataset.asthma_resolved = asthma_resolved.exists_for_patient()
-
-no_asthma_resolved = asthma.exists_for_patient() & ~asthma_resolved.exists_for_patient()
-dataset.no_asthma_resolved = no_asthma_resolved
-
-non_selective_bb = hist_med.fetch(Codelists.NSBB.codes, 3)
-dataset.non_selective_bb = non_selective_bb.exists_for_patient()
-
-# ###
-# # OTHER PRESCRIBING INDICATORS
-# # I - Heart failure and NSAID audit (HF_P3I)
-# ###
-# # oral_nsaid from A
-
-heart_failure = hist_clinical.fetch(Codelists.HF.codes, ever=True)
-dataset.heart_failure = heart_failure.exists_for_patient()
-
-
-# ###
-# # OTHER PRESCRIBING INDICATORS
-# # K - Chronic Renal Impairment & NSAID Audit (KI_P3K)
-# ###
-# # oral_nsaid from A
-#####TODO: Need to get comparator
-latest_egfr = get_latest_clinical_event(
-    clinical_events, Codelists.EGFR, INTERVAL.start_date
+asthma_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-astres_cod.csv", column="code",
 )
 
-egfr_between_1_and_45 = (
-    (latest_egfr.numeric_value.is_not_null())
-    & (latest_egfr.numeric_value >= 1)
-    & (latest_egfr.numeric_value < 45)
-)
-dataset.egfr_between_1_and_45 = egfr_between_1_and_45
-
-
-
-
-
-
-# ###
-# # MONITORING COMPOSITE INDICATOR
-# # AC - ACEI Audit (MO_P13)
-# ####
-
-acei = hist_med.fetch(Codelists.ACEI.codes, 15)
-dataset.acei = acei.exists_for_patient()
-
-loop_diuretic = hist_med.fetch(Codelists.LOOP_DIURETICS.codes, 15)
-dataset.loop_diuretic = loop_diuretic.exists_for_patient()
-
-acei_recent = hist_med.fetch(Codelists.ACEI.codes, 6)
-dataset.acei_recent = acei_recent.exists_for_patient()
-
-loop_diuretic_recent = hist_med.fetch(Codelists.LOOP_DIURETICS.codes, 6)
-dataset.loop_diuretic_recent = loop_diuretic_recent.exists_for_patient()
-
-renal_function_test = hist_med.fetch(Codelists.RENAL_FUNCTION.codes, 15)
-dataset.renal_function_test = renal_function_test.exists_for_patient()
-
-electrolytes_test = hist_med.fetch(Codelists.ELECTROLYTES_TEST.codes, 15)
-dataset.electrolytes_test = electrolytes_test.exists_for_patient()
-
-dataset.age_gt_75 = (dataset.age >= 75) & (dataset.age <= 120)
-
-
-# ###
-# # MONITORING COMPOSITE INDICATOR
-# # ME - Methotrexate audit (MO_P15)
-# ####
-
-methotrexate_6_3_month = hist_med.fetch(Codelists.METHOTREXATE.codes, 6, 3)
-dataset.methotrexate_6_3_month = methotrexate_6_3_month.exists_for_patient()
-
-methotrexate_3_month = hist_med.fetch(Codelists.METHOTREXATE.codes, 3)
-dataset.methotrexate_3_month = methotrexate_3_month.exists_for_patient()
-
-full_blood_count = hist_med.fetch(Codelists.FULL_BLOOD_COUNT.codes, 3)
-dataset.full_blood_count = full_blood_count.exists_for_patient()
-
-liver_function_test = hist_med.fetch(Codelists.FULL_BLOOD_COUNT.codes, 3)
-dataset.liver_function_test = liver_function_test.exists_for_patient()
-
-
-# ###
-# # MONITORING COMPOSITE INDICATOR
-# # LI - Lithium audit (MO_P17)
-# ####
-
-lithiumm_6_3_month = hist_med.fetch(Codelists.LITHIUM.codes, 6, 3)
-dataset.lithiumm_6_3_month = lithiumm_6_3_month.exists_for_patient()
-
-lithium_3_month = hist_med.fetch(Codelists.LITHIUM.codes, 3)
-dataset.lithium_3_month = lithium_3_month.exists_for_patient()
-
-lithium_level_3_month = hist_med.fetch(Codelists.LITHIUM_LEVEL.codes, 3)
-dataset.lithium_level_3_month = lithium_level_3_month.exists_for_patient()
-
-# ###
-# # MONITORING COMPOSITE INDICATOR
-# # AM - Amiodarone audit (MO_P18)
-# ####
-
-amiodarone_12_6_month = hist_med.fetch(Codelists.AMIODARONE.codes, 12, 6)
-dataset.amiodarone_12_6_month = amiodarone_12_6_month.exists_for_patient()
-
-amiodarone_6_month = hist_med.fetch(Codelists.AMIODARONE.codes, 6)
-dataset.amiodarone_6_month = amiodarone_6_month.exists_for_patient()
-
-thyroid_function_test = hist_clinical.fetch(Codelists.TFT.codes, 6)
-dataset.thyroid_function_test = thyroid_function_test.exists_for_patient()
-
-dataset.population_filter = (
-    ((dataset.age >= 18) & (dataset.age < 120))
-    & registered_practice.exists_for_patient()
-    & ~(
-        patients.date_of_death.is_not_null()
-        & patients.date_of_death.is_before(INTERVAL.start_date)
-    ) &
-    patients.sex.is_in(["male", "female"])
+asthma_icd = codelist_from_csv(
+    "codelists/user-markdrussell-asthma-secondary-care.csv", column="code",
 )
 
-## Indicator definitions
-
-dataset.indicator_a_denominator = dataset.population_filter & ~dataset.ppi
-
-dataset.indicator_a_numerator = dataset.indicator_a_denominator & dataset.oral_nsaid
-
-dataset.indicator_b_denominator = dataset.population_filter & ~dataset.ppi & (
-    dataset.gi_bleed | dataset.peptic_ulcer
+copd_diag = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-copd_cod.csv", column="code",
 )
 
-dataset.indicator_b_numerator = dataset.indicator_b_denominator & dataset.oral_nsaid
-
-dataset.indicator_c_denominator = dataset.population_filter & ~dataset.ppi & (
-    dataset.gi_bleed | dataset.peptic_ulcer
+copd_emerg = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-copdadmsn_cod.csv", column="code",
 )
 
-dataset.indicator_c_numerator = dataset.indicator_c_denominator & (
-    dataset.antiplatelet_excluding_aspirin | dataset.aspirin
+copd_snomed = (
+    copd_diag
+    + copd_emerg
 )
 
-dataset.indicator_d_denominator = dataset.population_filter & dataset.anticoagulant
-
-dataset.indicator_d_numerator = dataset.indicator_d_denominator & dataset.oral_nsaid
-
-
-dataset.indicator_e_denominator = dataset.population_filter & dataset.anticoagulant & ~dataset.ppi
-
-dataset.indicator_e_numerator = (
-    dataset.indicator_e_denominator & dataset.co_prescribed_anticoagulant_antiplatelet_including_aspirin
+copd_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-copdres_cod.csv", column="code",
 )
 
-dataset.indicator_f_denominator = dataset.population_filter & dataset.aspirin & ~dataset.ppi
-
-dataset.indicator_f_numerator = (
-    dataset.indicator_f_denominator & dataset.co_prescribed_aspirin_antiplatelet_excluding_aspirin
+copd_icd = codelist_from_csv(
+    "codelists/user-markdrussell-COPD_admission.csv", column="code",
 )
 
-dataset.indicator_g_denominator = dataset.population_filter & dataset.asthma & (
-    asthma_resolved.date.maximum_for_patient() < asthma.date.maximum_for_patient()
+chd_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-chd_cod.csv", column="code",
 )
 
-dataset.indicator_g_denominator_alternative = (
-    dataset.population_filter &
-    dataset.asthma & ~dataset.asthma_resolved
-) | (asthma_resolved.date.maximum_for_patient() <= asthma.date.maximum_for_patient())
-
-dataset.indicator_g_numerator = dataset.indicator_g_denominator & dataset.non_selective_bb
-
-dataset.indicator_i_denominator = dataset.population_filter & dataset.heart_failure
-
-dataset.indicator_i_numerator = dataset.indicator_i_denominator & dataset.oral_nsaid
-
-dataset.indicator_k_denominator = dataset.population_filter & dataset.egfr_between_1_and_45
-
-dataset.indicator_k_numerator = dataset.indicator_k_denominator & dataset.oral_nsaid
-
-
-dataset.indicator_ac_denominator = dataset.population_filter & dataset.age_gt_75 & (
-    dataset.acei & dataset.acei_recent
-) | (dataset.loop_diuretic & dataset.loop_diuretic_recent)
-
-dataset.indicator_ac_numerator = dataset.indicator_ac_denominator & (
-    ~dataset.renal_function_test | ~dataset.electrolytes_test
+chd_icd = codelist_from_csv(
+    "codelists/user-markdrussell-coronary-heart-disease-secondary-care.csv", column="code",
 )
 
-dataset.indicator_me_denominator = (
-    dataset.population_filter &
-    dataset.methotrexate_6_3_month
-    & dataset.methotrexate_3_month
+stroke_diag = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-strk_cod.csv", column="code",
 )
 
-dataset.indicator_me_no_fbc_numerator = (
-    dataset.indicator_me_denominator & ~dataset.full_blood_count
+tia_diag = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-tia_cod.csv", column="code",
 )
 
-dataset.indicator_me_no_lft_numerator = (
-    dataset.indicator_me_denominator & ~dataset.liver_function_test
+stroke_snomed = (
+    stroke_diag
+    + tia_diag
 )
 
-dataset.indicator_li_denominator = (
-    dataset.population_filter &
-    dataset.lithiumm_6_3_month & dataset.lithium_3_month
+stroke_icd = codelist_from_csv(
+    "codelists/user-markdrussell-stroke-and-tia-secondary-care.csv", column="code",
 )
 
-dataset.indicator_li_numerator = (
-    dataset.indicator_li_denominator & ~dataset.lithium_level_3_month
+heart_failure_diag = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-hf_cod.csv", column="code",
 )
 
-dataset.indicator_am_denominator = (
-    dataset.population_filter &
-    dataset.amiodarone_12_6_month & dataset.amiodarone_6_month
+heart_failure_lv_diag = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-hflvsd_cod.csv", column="code",
 )
 
-dataset.indicator_am_numerator = (
-    dataset.indicator_am_denominator & dataset.thyroid_function_test
+heart_failure_snomed = (
+    heart_failure_diag
+    + heart_failure_lv_diag
 )
 
-
-
-
-any_denominator = (
-    dataset.indicator_a_denominator |
-    dataset.indicator_b_denominator |
-    dataset.indicator_c_denominator |
-    dataset.indicator_d_denominator |
-    dataset.indicator_e_denominator |
-    dataset.indicator_f_denominator |
-    dataset.indicator_g_denominator |
-    dataset.indicator_i_denominator |
-    dataset.indicator_k_denominator |
-    dataset.indicator_ac_denominator |
-    dataset.indicator_me_denominator |
-    dataset.indicator_li_denominator |
-    dataset.indicator_am_denominator
+heart_failure_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-hfres_cod.csv", column="code",
 )
 
+heart_failure_icd = codelist_from_csv(
+    "codelists/user-markdrussell-heart-failure-secondary-care.csv", column="code",
+)
 
-if AS_DATASET:
-    dataset.define_population(
-        dataset.population_filter
-        & any_denominator
-        )
+dementia_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dem_cod.csv", column="code",
+)
 
-### Measures
-start_date = "2019-01-01"
+dementia_icd = codelist_from_csv(
+    "codelists/user-markdrussell-dementia-secondary-care.csv", column="code",
+)
 
-if BACKEND == "expectations":
-    num_intervals = 4
-else:
-    num_intervals = calculate_num_intervals(start_date)
+multiple_sclerosis_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-multiple-sclerosis-codes.csv", column="code",
+)
 
-# Initialize the measures
-all_measures = {
-    "a": Measure("a", dataset.indicator_a_numerator, dataset.indicator_a_denominator),
-    "b": Measure("b", dataset.indicator_b_numerator, dataset.indicator_b_denominator),
-    "c": Measure("c", dataset.indicator_c_numerator, dataset.indicator_c_denominator),
-    "d": Measure("d", dataset.indicator_d_numerator, dataset.indicator_d_denominator),
-    "e": Measure("e", dataset.indicator_e_numerator, dataset.indicator_e_denominator),
-    "f": Measure("f", dataset.indicator_f_numerator, dataset.indicator_f_denominator),
-    "k": Measure("k", dataset.indicator_k_numerator, dataset.indicator_k_denominator),
-    "g": Measure("g", dataset.indicator_g_numerator, dataset.indicator_g_denominator),
-    "i": Measure("i", dataset.indicator_i_numerator, dataset.indicator_i_denominator),
-    "ac": Measure("ac", dataset.indicator_ac_numerator, dataset.indicator_ac_denominator),
-    "me_no_fbc": Measure("me_no_fbc", dataset.indicator_me_no_fbc_numerator, dataset.indicator_me_denominator),
-    "me_no_lft": Measure("me_no_lft", dataset.indicator_me_no_lft_numerator, dataset.indicator_me_denominator),
-    "li": Measure("li", dataset.indicator_li_numerator, dataset.indicator_li_denominator),
-    "am": Measure("am", dataset.indicator_am_numerator, dataset.indicator_am_denominator),
-}
+multiple_sclerosis_icd = codelist_from_csv(
+    "codelists/user-markdrussell-multiple-sclerosis-secondary-care.csv", column="code",
+)
 
+epilepsy_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-epil_cod.csv", column="code",
+)
 
-measures = Measures()
+epilepsy_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-epilres_cod.csv", column="code",
+)
 
-if args.measure:
+epilepsy_icd = codelist_from_csv(
+    "codelists/user-markdrussell-epilepsy-secondary-care.csv", column="code",
+)
 
-    measure = all_measures[args.measure]
+crohns_disease_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-crohns-disease-codes.csv", column="code",
+)
 
-    measures.define_measure(
-        name=f"indicator_{measure.name}",
-        numerator=measure.numerator,
-        denominator=measure.denominator,
-        intervals=months(num_intervals).starting_on(start_date),
-        group_by={
-            "practice": dataset.registered_practice_id,
-        },
-    )
+crohns_disease_icd = codelist_from_csv(
+    "codelists/user-markdrussell-crohns-disease-secondary-care.csv", column="code",
+)
 
-else:
-    for _, measure in all_measures.items():
-    
-        measures.define_measure(
-            name=f"indicator_{measure.name}",
-            numerator=measure.numerator,
-            denominator=measure.denominator,
-            intervals=months(num_intervals).starting_on(start_date),
-            group_by={
-                "practice": dataset.registered_practice_id,
-            },
-        )
+ulcerative_colitis_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-ulcerative-colitis-uc-codes.csv", column="code",
+)
+
+ulcerative_colitis_icd = codelist_from_csv(
+    "codelists/user-markdrussell-ulcerative-colitis-secondary-care.csv", column="code",
+)
+
+dm_type2_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmtype2audit_cod.csv", column="code",
+)
+
+dm_type2_icd = codelist_from_csv(
+    "codelists/user-markdrussell-type-2-diabetes-secondary-care.csv", column="code",
+)
+
+dm_type2_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmres_cod.csv", column="code",
+)
+
+dm_type1_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmtype1audit_cod.csv", column="code",
+)
+
+dm_type1_icd = codelist_from_csv(
+    "codelists/user-markdrussell-type-1-diabetes-secondary-care.csv", column="code",
+)
+
+## The following NHSD ref set includes ESRF, dialysis and transplant codes
+ckd_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-ckdatrisk2_cod.csv", column="code",
+)
+
+ckd_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-ckdres_cod.csv", column="code",
+)
+
+ckd_icd = codelist_from_csv(
+    "codelists/user-markdrussell-chronic-kidney-disease-secondary-care.csv", column="code",
+)
+
+psoriasis_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-adult-and-child-psoriasis-codes.csv", column="code",
+)
+
+psoriasis_icd = codelist_from_csv(
+    "codelists/user-markdrussell-psoriasis-secondary-care.csv", column="code",
+)
+
+atopic_dermatitis_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-atopic-dermatitis-codes.csv", column="code",
+)
+
+atopic_dermatitis_icd = codelist_from_csv(
+    "codelists/user-markdrussell-atopic-dermatitis-secondary-care.csv", column="code",
+)
+
+osteoporosis_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-osteo_cod.csv", column="code",
+)
+
+osteoporosis_icd = codelist_from_csv(
+    "codelists/user-markdrussell-osteoporosis-secondary-care.csv", column="code",
+)
+
+osteoporosis_resolved = codelist_from_csv(
+    "codelists/user-markdrussell-osteoporosis-resolved.csv", column="code",
+)
+
+hiv_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-human-immunodeficiency-virus-hiv-codes.csv", column="code",
+)
+
+hiv_icd = codelist_from_csv(
+    "codelists/user-markdrussell-hiv-secondary-care.csv", column="code",
+)
+
+depression_diag = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-depr_cod.csv", column="code",
+)
+
+depression_management = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-depsupp_cod.csv", column="code",
+)
+
+depression_snomed = (
+    depression_diag
+    + depression_management
+)
+
+depression_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-depres_cod.csv", column="code",
+)
+
+depression_icd = codelist_from_csv(
+    "codelists/user-markdrussell-depression-secondary-care.csv", column="code",
+)
+
+depression_broad_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-depression_broad.csv", column="code",
+)
+
+depression_broad_icd = codelist_from_csv(
+    "codelists/user-markdrussell-depression-secondary-care.csv", column="code",
+)
+
+depression_broad_resolved = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-depres_cod.csv", column="code",
+)
+
+coeliac_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-coeliac-disease-codes.csv", column="code",
+)
+
+coeliac_icd = codelist_from_csv(
+    "codelists/user-markdrussell-coeliac-secondary-care.csv", column="code",
+)
+
+pmr_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-polymyalgia-rheumatica-pmr-codes.csv", column="code",
+)
+
+pmr_icd = codelist_from_csv(
+    "codelists/user-markdrussell-polymyalgia-rheumatica-pmr-secondary-care.csv", column="code",
+)
+
+rheumatoid_snomed = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-rheumatoid-arthritis-disorders.csv", column="code",
+)
+
+rheumatoid_icd = codelist_from_csv(
+    "codelists/user-markdrussell-rheumatoid-arthritis-secondary-care.csv", column="code",
+)

@@ -1,246 +1,51 @@
+from ehrql import Dataset
 import datetime
-from databuilder.ehrql import Dataset, days, years
-from databuilder.tables.beta.tpp import (
-    patients, addresses, 
-    ons_deaths, 
-    sgss_covid_all_tests,
-    practice_registrations, 
-    clinical_events,
-    vaccinations,
+from ehrql.tables.beta.tpp import (
+	opa_cost, ec_cost, apcs_cost, patients, practice_registrations
 )
-from ehrql.query_language import table_from_file, PatientFrame, Series
-from covariates import *
-from variables import *
-from ehrql import minimum_of
 
-# import matched data
+def age_as_of(date):
+  dob =  patients.date_of_birth
+  delta_age = date - dob
+  return delta_age.years
+ # returns an integer (rounded down)
 
-@table_from_file("output/matched_cases_stp.csv")
-class matched_cases(PatientFrame):
-    age = Series(int)
-    sex = Series(str)
-    region = Series(str)
-    registration_date = Series(date)
-    long_covid_dx = Series(int)
-    long_covid_dx_date= Series(date)
-    index_date = Series(date)
-    end_death = Series(date)
-    end_deregist = Series(date)
-    end_lc_cure = Series(date)
-    set_id = Series(int)
-    exposure = Series(int)
-    match_counts = Series(float)
+start_date = datetime.date(2017, 4, 1)
+end_date = datetime.date(2018, 3, 31)
 
-# Define dataset variables
+registrations = practice_registrations \
+    .except_where(practice_registrations.start_date >= start_date) \
+    .except_where(practice_registrations.end_date <= end_date)
 
+# get the number of registrations in this period to exclude anyone with >1 in the `set_population` later
+registrations_number = registrations.count_for_patient()
+
+# need to get the start and end date of last registration only
+registration = registrations \
+    .sort_by(practice_registrations.start_date).last_for_patient()
+
+#Define population first
 dataset = Dataset()
-dataset.define_population(
-    (age >= 18)
-    & matched_cases.exists_for_patient()
-)
-dataset.age = matched_cases.age
-dataset.sex = matched_cases.sex
-dataset.index_date = matched_cases.index_date
-dataset.end_death = matched_cases.end_death
-dataset.end_deregist = matched_cases.end_deregist
-dataset.end_lc_cure = matched_cases.end_lc_cure
-dataset.end_date = minimum_of(dataset.end_death, dataset.end_deregist, dataset.end_lc_cure, study_end_date)
-dataset.exposure = matched_cases.exposure
 
-# Add visits for any prescriptions:
-# total_drug_visit(dataset, dataset.index_date, end_date=dataset.end_date)
+dataset.sex = patients.sex
+dataset.age = age_as_of(start_date)
+dataset.practice_nuts = registration.practice_nuts1_region_name
 
-# Add drug prescription frequencies by BNF chapters 
-# drugs: bnf ch1 : gi drugs
-drug_1gi_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_1gi_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
+population = (registrations_number == 1) & (dataset.age <= 100) & (dataset.age >= 18) & (dataset.sex.contains("male"))
+dataset.define_population(population)
 
-# drugs: bnf ch2: cv drugs
-drug_2cv_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_2cv_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
+# Cost function
+# inpatient hospital costs
+dataset.apcs_cost = apcs_cost \
+    .where((apcs_cost.admission_date >= start_date) &
+          (apcs_cost.admission_date <=  end_date)).grand_total_payment_mff.sum_for_patient() 
 
+# A&E monthly costs
+dataset.ec_cost = ec_cost \
+    .where((ec_cost.ec_decision_to_admit_date >= start_date) &
+          (ec_cost.ec_decision_to_admit_date <=  end_date)).grand_total_payment_mff.sum_for_patient() 
 
-# drugs: bnf ch3 chest drugs
-drug_3chest_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_3chest_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch4: cns
-drug_4cns_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_4cns_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch5: infectious
-drug_5inf_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_5inf_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch6: metabolism drugs
-drug_6meta_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_6meta_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch7 GYN drugs
-drug_7gyn_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_7gyn_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch8 cancer drugs
-drug_8cancer_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_8cancer_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch9 nutrition
-drug_9diet_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_9diet_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch10 muscle
-drug_10muscle_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_10muscle_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-# drugs: bnf ch11 eyes
-drug_11eye_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_11eye_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch12 ent
-drug_12ent_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_12ent_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-
-# drugs: bnf ch13 skin
-drug_13skin_number(dataset, dataset.index_date, num_months=1, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=2, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=3, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=4, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=5, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=6, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=7, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=8, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=9, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=10, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=11, end_date=dataset.end_date)
-drug_13skin_number(dataset, dataset.index_date, num_months=12, end_date=dataset.end_date)
-
-dataset.configure_dummy_data(population_size=30000)
+# outpatient hospital costs
+dataset.opa_cost = opa_cost \
+    .where((opa_cost.appointment_date >= start_date) &
+          (opa_cost.appointment_date <=  end_date)).grand_total_payment_mff.sum_for_patient()

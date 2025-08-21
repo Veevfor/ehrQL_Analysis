@@ -23,7 +23,12 @@ from variables_library import (
 )
 
 '''
-The following scripts looks at the measure of selected medication used
+The following scripts looks at the measure of not using medicarion
+
+This is a combination of two groups
+1) Patients with NO medication AND diagonsis
+
+We may be leaving patients with ADHD and medication for something else 
 '''
 
 measures = create_measures()
@@ -49,12 +54,11 @@ age_band = case(
     when(age.is_null()).then("Missing"),
 )
 
-
-selected_events = medications.where(
+selected_medication = medications.where(
     medications.date.is_on_or_before(INTERVAL.end_date)
 )
 
-has_med_date = first_medication_event(selected_events, adhd_medication_codelist).date
+has_med_date = first_medication_event(selected_medication, adhd_medication_codelist).date
 
 selected_conditions = clinical_events.where(
     clinical_events.date.is_on_or_before(INTERVAL.end_date)
@@ -62,13 +66,13 @@ selected_conditions = clinical_events.where(
 
 has_adhd_cod_date = first_matching_event(selected_conditions, adhd_codelist).date
 
-has_adhd_and_meds = has_adhd_cod_date < has_med_date
-has_adhd_and_meds = has_adhd_and_meds.is_not_null()
+#Computing group 1 - No medication and diagnosis
+has_med_and_no_dia = has_med_date.is_not_null() & ~(has_adhd_cod_date.is_not_null())
 
-#This looks at the incidence of ADHD medication in the population of ADHD
+#This looks at the incidence of ADHD medication in the ADHD population
 measures.define_measure(
-    name= f"Table_3_with_ADHD_that_are_prescribed_ADHD_medication" + add_datestamp(),
-    numerator= has_adhd_and_meds,
+    name= f"Table_3_NOT_prescribed_ADHD_medication_in_ADHD_group" + add_datestamp(),
+    numerator= has_med_and_no_dia,
     denominator=(
         has_registration
         & has_adhd_cod_date.is_not_null()

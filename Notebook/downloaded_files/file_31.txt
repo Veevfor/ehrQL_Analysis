@@ -1,103 +1,66 @@
-from ehrql import (
-    create_dataset,
-    days,
-    minimum_of,
-    maximum_of,
+from ehrql import INTERVAL, create_measures, months
+from ehrql.tables.tpp import (
+    patients,
+    clinical_events,
+    practice_registrations,
+)
+from ehrql.tables.raw.tpp import medications
+
+from codelists import (
+    pharmacy_first_event_codes,
+    pharmacy_first_med_codes,
 )
 
-# Bring table definitions from the TPP backend 
+measures = create_measures()
+measures.configure_dummy_data(population_size=1000)
 
-from ehrql.tables.tpp import ( 
-    patients, 
+start_date = "2024-02-01"
+monthly_intervals = 6
+
+registration = practice_registrations.for_patient_on(INTERVAL.end_date)
+
+# Select Pharmacy First events during interval date range
+pharmacy_first_events = clinical_events.where(
+    clinical_events.date.is_on_or_between(INTERVAL.start_date, INTERVAL.end_date)
+).where(
+    clinical_events.snomedct_code.is_in(
+        pharmacy_first_event_codes
+    )
 )
 
-# create dataset to create dates for different cohorts
+pharmacy_first_ids = pharmacy_first_events.consultation_id
+has_pharmacy_first_consultation = pharmacy_first_events.exists_for_patient()
 
-dataset = create_dataset()
+# Select Pharmacy First consultations during interval date range
+selected_medications = medications.where(
+    medications.date.is_on_or_between(INTERVAL.start_date, INTERVAL.end_date)
+).where(medications.consultation_id.is_in(pharmacy_first_ids))
 
-dataset.define_population(
-    patients.date_of_birth.is_not_null()
+# First medication for each patient
+first_selected_medication = (
+    selected_medications.sort_by(selected_medications.date).first_for_patient().dmd_code
+)
+# Boolean variable that selected medication is part of pharmacy first med codelists
+has_pharmacy_first_medication = first_selected_medication.is_in(pharmacy_first_med_codes)
+
+# Numerator, patients with a PF medication
+# This allows me to count all (first) medications linked to a PF consultation
+numerator = first_selected_medication.is_not_null()
+
+# Denominator, registered patients (f/m) with a PF consultation
+denominator = (
+    registration.exists_for_patient()
+    & patients.sex.is_in(["male", "female"])
+    & has_pharmacy_first_consultation
 )
 
-dataset.configure_dummy_data(population_size=1000)
-
-# Import study_dates dictionary
-
-from variables_dates import study_dates
-
-# Extracting all relevant dates from the study_dates dictionary
-
-pandemic_start     = study_dates["pandemic_start"]  # rough start date for pandemic in UK
-delta_date         = study_dates["delta_date"]
-omicron_date       = study_dates["omicron_date"]
-all_eligible       = study_dates["all_eligible"]    # all 18+ are eligible for vax on this date (protocol)
-lcd_date           = study_dates["lcd_date"]        # last collection date for linked data (APCS; ONS_Deaths; SGSS_*)
-
-# Import preliminary date variables (death date, vax dates)
-
-from variables_dates import prelim_date_variables
-
-  ## Add the imported variables to the dataset
-
-for var_name, var_value in prelim_date_variables.items():
-    setattr(dataset, var_name, var_value)
-
-# Import jcvi variables ( JCVI group and derived variables; eligible date for vaccination based on JCVI group)
-from variables_dates import jcvi_variables
-
-  ## Add the imported variables to the dataset
-for var_name, var_value in jcvi_variables.items():
-    setattr(dataset, var_name, var_value)
-
-# Generate cohort dates
-
-## Prevax
-
-dataset.index_prevax = minimum_of(pandemic_start, pandemic_start)
-
-dataset.end_prevax_exposure = minimum_of(
-    dataset.cens_date_death, 
-    dataset.vax_date_covid_1, 
-    dataset.vax_date_eligible, 
-    all_eligible
-)
-
-dataset.end_prevax_outcome = minimum_of(
-    dataset.cens_date_death, 
-    lcd_date
-)
-
-## Vax
-
-dataset.index_vax = maximum_of(
-    dataset.vax_date_covid_2 + days(14),
-    delta_date
-)
-
-dataset.end_vax_exposure = minimum_of(
-    dataset.cens_date_death, 
-    omicron_date
-)
-
-dataset.end_vax_outcome = minimum_of(
-    dataset.cens_date_death, 
-    lcd_date
-)
-
-## Unvax
-
-dataset.index_unvax = maximum_of(
-    dataset.vax_date_eligible + days(84),
-    delta_date
-)
-
-dataset.end_unvax_exposure = minimum_of(
-    dataset.cens_date_death, 
-    omicron_date, 
-    dataset.vax_date_covid_1
-)
-
-dataset.end_unvax_outcome = minimum_of(
-    dataset.cens_date_death, 
-    lcd_date
+measures.define_measure(
+    name="pf_medication_count",
+    numerator = first_selected_medication.is_not_null(),
+    denominator=denominator,
+    group_by={
+        "dmd_code": first_selected_medication,
+        "pharmacy_first_med": has_pharmacy_first_medication,
+    },
+    intervals=months(monthly_intervals).starting_on(start_date),
 )

@@ -10,8 +10,8 @@ def age_as_of(date):
   return delta_age.years
  # returns an integer (rounded down)
 
-start_date = datetime.date(2019, 4, 1)
-end_date = datetime.date(2020, 3, 31)
+start_date = datetime.date(2018, 4, 1)
+end_date = datetime.date(2019, 3, 31)
 
 registrations = practice_registrations \
     .except_where(practice_registrations.start_date >= start_date) \

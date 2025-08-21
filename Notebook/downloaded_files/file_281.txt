@@ -1,25 +1,18 @@
-# Setup
-from ehrql import codelist_from_csv
+from ehrql import create_dataset
+from ehrql.tables.tpp import patients, practice_registrations
 
+dataset = create_dataset()
 
+index_date = "2020-03-31"
 
-# REM sleep disorder (RSD)
-rsd_snomed = codelist_from_csv(
-  "codelists/bristol-rem-sleep-disorder-snomed-ct-v13.csv",
-  column = "code",
-)
-rsd_icd10 = codelist_from_csv(
-  "codelists/bristol-rem-sleep-disorder-icd10-v13.csv",
-  column = "code",
-)
+has_registration = practice_registrations.for_patient_on(
+    index_date
+).exists_for_patient()
 
-# Additional temporary REM sleep disorder (RSD)
-rsd_snomed_new = codelist_from_csv(
-  "codelists/bristol-rem-sleep-behaviour-disorder-snomed-ct-v13.csv",
-  column = "code",
-)
+dataset.define_population(has_registration)
+dataset.configure_dummy_data(population_size=1000)
 
-rsd_ctv3 = codelist_from_csv(
-  "codelists/bristol-rem-sleep-behaviour-disorder-ctv3.csv",
-  column = "code",
-)
+dataset.registered = has_registration
+dataset.age = patients.age_on(index_date)
+dataset.sex = patients.sex
+

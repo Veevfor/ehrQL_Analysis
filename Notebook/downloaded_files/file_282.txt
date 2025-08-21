@@ -1,59 +1,89 @@
-# To test dataset definition run the following command in the terminal:
-# pytest tests/test_datasets.py
-import os
+from argparse import ArgumentParser
 
-import pandas as pd
+from ehrql import INTERVAL, Measures, months
+from ehrql.tables.tpp import patients
 
+from dm_dataset import (
+    make_dm_dataset,
+    get_registration_status,
+    get_dm_reg_r1,
+    get_dm_reg_r2,
+    get_dm021_r1,
+    get_dm021_r2,
+    get_dm021_r3,
+    get_dm021_r4,
+    get_dm021_r5,
+    get_dm021_r6,
+    get_dm021_r7,
+    get_dm021_r8,
+    get_dm021_r9,
+    get_dm021_r10,
+)
 
-# Load datasets
-cwd = os.getcwd()
-df_cohortextractor = pd.read_csv(f"{cwd}/output/dataset_cohortextractor_2022-09-25.csv")
-df_ehrql = pd.read_csv(f"{cwd}/output/dataset_ehrql_2022-09-25.csv")
+# Define index date and cutoff value for clinical rules
+parser = ArgumentParser()
+parser.add_argument("--ifcchba-cutoff-val", type=int)
+args = parser.parse_args()
+ifcchba_cutoff_val = args.ifcchba_cutoff_val
 
+index_date = INTERVAL.start_date
 
-# Test dataset definition works as intended with dummy data
-def test_dataset_definition():
-    # arrange
-    # act
-    pt7 = df_ehrql.iloc[0].to_dict()
+# Instantiate dataset and define clinical variables
+dataset = make_dm_dataset(index_date=index_date)
 
-    # assert
-    assert pt7 == {
-        "patient_id": 7,
-        "sex": "male",
-        "age": 22,
-        "has_died": "F",
-        "care_home_tpp": "F",
-        "care_home_code": "F",
-        "msoa": "E02000010",
-        "stp": "STP3",
-        "region": "region_practice3",
-        "registered": "T",
-        "postest_01": "F",
-        "postest_14": "F",
-        "postest_ever": "T",
-        "primary_care_covid_case_01": "F",
-        "primary_care_covid_case_14": "F",
-        "primary_care_covid_case_ever": "F",
-        "covidemergency_01": "F",
-        "covidemergency_14": "F",
-        "covidemergency_ever": "F",
-        "covidadmitted_01": "F",
-        "covidadmitted_14": "F",
-        "covidadmitted_ever": "T",
-        "any_infection_or_disease_01": "F",
-        "any_infection_or_disease_14": "F",
-        "any_infection_or_disease_ever": "T",
-        "included": "T",
-    }
+# Define registration status
+# NOTE: this is not identical to GMS registration status
+has_registration = get_registration_status(index_date)
 
+# Define diabetes register (DM_REG) rules:
+dataset.dm_reg_r1 = get_dm_reg_r1(dataset)
+dataset.dm_reg_r2 = get_dm_reg_r2(dataset)
 
-# Test that column names are identical across ehrQL and cohort extractor
-def test_dataset_columns():
-    # arrange
-    # act
-    cols_cohortextractor = df_cohortextractor.columns
-    cols_ehrql = df_ehrql.columns
+# Define diabetes indicator DM021 rules:
+dataset.dm021_r1 = get_dm021_r1(dataset)
+dataset.dm021_r2 = get_dm021_r2(dataset, index_date, ifcchba_cutoff_val)
+dataset.dm021_r3 = get_dm021_r3(dataset, index_date)
+dataset.dm021_r4 = get_dm021_r4(dataset, index_date)
+dataset.dm021_r5 = get_dm021_r5(dataset, index_date)
+dataset.dm021_r6 = get_dm021_r6(dataset, index_date)
+dataset.dm021_r7 = get_dm021_r7(dataset, index_date)
+dataset.dm021_r8 = get_dm021_r8(dataset, index_date, ifcchba_cutoff_val)
+dataset.dm021_r9 = get_dm021_r9(dataset, index_date)
+dataset.dm021_r10 = get_dm021_r10(dataset, index_date)
 
-    # assert
-    assert sorted(cols_cohortextractor) == sorted(cols_ehrql)
+# Define select action for DM_REG
+has_dm_reg_select_r2 = dataset.dm_reg_r1 & ~dataset.dm_reg_r2
+
+# Define first select action for DM021 (Rule 2)
+has_dm021_select_r2 = ~dataset.dm021_r1 & dataset.dm021_r2
+
+# Define second select action for DM021 (Rule 10)
+has_dm021_select_r10 = (
+    ~dataset.dm021_r1
+    & ~dataset.dm021_r2
+    & ~dataset.dm021_r3
+    & ~dataset.dm021_r4
+    & ~dataset.dm021_r5
+    & ~dataset.dm021_r6
+    & ~dataset.dm021_r7
+    & ~dataset.dm021_r8
+    & ~dataset.dm021_r9
+    & ~dataset.dm021_r10
+)
+
+# Define DM021 numerator and denominator
+# DM021 gets applied to DM_REG (has_dm_reg_select_r2)
+# The numerator is applied to the patients selected into the denominator
+dm021_numerator = has_dm021_select_r2
+dm021_denominator = has_dm_reg_select_r2 & (has_dm021_select_r2 | has_dm021_select_r10)
+
+# Define measures
+measures = Measures()
+
+measures.define_measure(
+    name="dm021",
+    numerator=dm021_numerator,
+    denominator=dm021_denominator,
+    group_by={"sex": patients.sex},
+    intervals=months(12).starting_on("2022-03-01"),
+)

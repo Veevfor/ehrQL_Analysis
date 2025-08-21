@@ -1,216 +1,318 @@
-from ehrql import create_dataset, days, months, years, case, when, create_measures, INTERVAL, minimum_of, maximum_of
-from ehrql.tables.tpp import patients, medications, practice_registrations, clinical_events, apcs, addresses, ons_deaths, appointments
-from ehrql.codes import ICD10Code
-from datetime import date, datetime
-import codelists_ehrQL as codelists
-
-diseases = ["asthma", "copd", "chd", "stroke", "heart_failure", "dementia", "multiple_sclerosis", "epilepsy", "crohns_disease", "ulcerative_colitis", "dm_type2", "ckd", "psoriasis", "atopic_dermatitis", "osteoporosis", "rheumatoid", "depression", "coeliac", "pmr"]
-#diseases = ["depression_broad"]
-codelist_types = ["snomed", "icd"]
-
-index_date = "2016-04-01"
-end_date = "2024-11-30"
-
-dataset = create_dataset()
-dataset.configure_dummy_data(population_size=1000)
-
-# Incident diagnostic code in primary care record (SNOMED) (assuming before study end date)
-def first_code_in_period_snomed(dx_codelist):
-    return clinical_events.where(
-        clinical_events.snomedct_code.is_in(dx_codelist)
-    ).where(
-        clinical_events.date.is_on_or_before(end_date)
-    ).sort_by(
-        clinical_events.date
-    ).first_for_patient()
-
-# Incident diagnostic code in secondary care record (ICD10 primary diagnoses) (assuming before study end date)
-def first_code_in_period_icd(dx_codelist):
-    return apcs.where(
-        apcs.primary_diagnosis.is_in(dx_codelist)
-    ).where(
-        apcs.admission_date.is_on_or_before(end_date)
-    ).sort_by(
-        apcs.admission_date
-    ).first_for_patient()
-
-# Registration for 12 months prior to incident diagnosis date
-def preceding_registration(dx_date):
-    return practice_registrations.where(
-        practice_registrations.start_date.is_on_or_before(dx_date - months(12))
-    ).except_where(
-        practice_registrations.end_date.is_on_or_before(dx_date)
-    )
-
-# Define sex
-dataset.sex = patients.sex
-
-# Date of death
-dataset.date_of_death = patients.date_of_death
-
-# Any practice registration before study end date
-any_registration = practice_registrations.where(
-            practice_registrations.start_date <= end_date
-        ).except_where(
-            practice_registrations.end_date < index_date    
-        ).exists_for_patient()
-
-# Age at index date
-dataset.age = patients.age_on(index_date)
-
-age_band = case(  
-    when((dataset.age >= 0) & (dataset.age < 9)).then("age_0_9"),
-    when((dataset.age >= 10) & (dataset.age < 19)).then("age_10_19"),
-    when((dataset.age >= 20) & (dataset.age < 29)).then("age_20_29"),
-    when((dataset.age >= 30) & (dataset.age < 39)).then("age_30_39"),
-    when((dataset.age >= 40) & (dataset.age < 49)).then("age_40_49"),
-    when((dataset.age >= 50) & (dataset.age < 59)).then("age_50_59"),
-    when((dataset.age >= 60) & (dataset.age < 69)).then("age_60_69"),
-    when((dataset.age >= 70) & (dataset.age < 79)).then("age_70_79"),
-    when((dataset.age >= 80)).then("age_greater_equal_80"),
+from ehrql import (
+    create_dataset,
+    years,
+    months,
+    days,
+)
+from ehrql.tables.tpp import (
+    clinical_events,
+    patients,
+    practice_registrations,
 )
 
-# Define patient ethnicity
-latest_ethnicity_code = (
-    clinical_events.where(clinical_events.snomedct_code.is_in(codelists.ethnicity_codes))
-    .where(clinical_events.date.is_on_or_before(end_date))
-    .sort_by(clinical_events.date)
-    .last_for_patient().snomedct_code.to_category(codelists.ethnicity_codes)
+# Diabetes mellitus variable library
+# Business Rules for Quality and Outcomes Framework (QOF) 2021/22 (Version 46)
+# Clinical data extraction criteria
+from variable_lib_helper import (
+    first_matching_event,
+    last_matching_event,
+    age_as_of,
+    practice_registration_as_of,
+    get_events_on_or_between,
 )
 
-dataset.ethnicity = case(
-    when(latest_ethnicity_code == "1").then("White"),
-    when(latest_ethnicity_code == "2").then("Mixed"),
-    when(latest_ethnicity_code == "3").then("Asian or Asian British"),
-    when(latest_ethnicity_code == "4").then("Black or Black British"),
-    when(latest_ethnicity_code == "5").then("Chinese or Other Ethnic Groups"),
-    otherwise="Unknown",
-)
+import codelists
 
-# Define patient IMD
-imd = addresses.for_patient_on(end_date).imd_rounded
 
-dataset.imd_quintile = case(
-    when((imd >= 0) & (imd < int(32844 * 1 / 5))).then("1 (most deprived)"),
-    when(imd < int(32844 * 2 / 5)).then("2"),
-    when(imd < int(32844 * 3 / 5)).then("3"),
-    when(imd < int(32844 * 4 / 5)).then("4"),
-    when(imd < int(32844 * 5 / 5)).then("5 (least deprived)"),
-    otherwise="Unknown",
-)
+# Define a dataset including all variables needed for the diabetes mellitus (dm)
+def make_dm_dataset(index_date):
+    # Instantiate dataset
+    dataset = create_dataset()
 
-# Define population
-dataset.define_population(
-    age_band.is_not_null()
-    & dataset.sex.is_in(["male", "female"])
-    & (dataset.date_of_death.is_after(index_date) | dataset.date_of_death.is_null())
-    & any_registration
-)
-
-for disease in diseases:
-
-    #snomed_inc_date = {}  # Dictionary to store dates
-    #icd_inc_date = {}
-
-    for codelist_type in codelist_types:
-
-        if (f"{codelist_type}" == "snomed"):
-            if hasattr(codelists, f"{disease}_snomed"):
-                disease_codelist = getattr(codelists, f"{disease}_snomed")
-                dataset.add_column(f"{disease}_prim_date", first_code_in_period_snomed(disease_codelist).date)
-            else:
-                dataset.add_column(f"{disease}_prim_date", first_code_in_period_snomed([]).date)
-        elif (f"{codelist_type}" == "icd"):
-            if hasattr(codelists, f"{disease}_icd"):
-                disease_codelist = getattr(codelists, f"{disease}_icd")    
-                dataset.add_column(f"{disease}_sec_date", first_code_in_period_icd(disease_codelist).admission_date)
-            else:
-                dataset.add_column(f"{disease}_sec_date", first_code_in_period_icd([]).admission_date)
-        else:
-            dataset.add_column(f"{disease}_{codelist_type}_inc_date", None)
-
-    # Incident date for each disease - combined primary and secondary care 
-    dataset.add_column(f"{disease}_inc_date",
-        minimum_of(*[date for date in [
-            (getattr(dataset, f"{disease}_prim_date", None)),
-            (getattr(dataset, f"{disease}_sec_date", None))
-            ] if date is not None]),
+    # Extract prior events for further use in variable definitions below
+    prior_events = clinical_events.where(
+        clinical_events.date.is_on_or_before(index_date)
     )
 
-    # Incident date within window - combined primary and secondary care 
-    dataset.add_column(f"{disease}_inc_case",
-        (getattr(dataset, disease + "_inc_date").is_on_or_between(index_date, end_date)
-        ).when_null_then(False)
+    # Field number: 2
+    # REG_DAT: The most recent date that the patient registered for GMS, where
+    # this registration occurred on or before the achievement date.
+    dataset.reg_dat = practice_registration_as_of(index_date).start_date
+
+    # Field number: 3
+    # REG_DAT: The first occurrence of the patient deregistering from GMS
+    # following the latest GMS registration.
+    dataset.dereg_dat = practice_registration_as_of(dataset.reg_dat).end_date
+
+    # Field number: 4
+    # PAT_AGE: The age of the patient in full years at the achievement date.
+    dataset.pat_age = age_as_of(index_date)
+
+    # Field number: 5
+    # DM_DAT: Date of the first diabetes diagnosis up to and including the
+    # achievement date.
+    dataset.dm_dat = first_matching_event(prior_events, codelists.dm_cod).date
+
+    # Field number: 6
+    # DMLAT_DAT: Date of the most recent diabetes diagnosis up to and
+    # including the achievement date.
+    dataset.dmlat_dat = last_matching_event(prior_events, codelists.dm_cod).date
+
+    # Field number: 7
+    # DMRES_DAT: Date of the most recent diabetes diagnosis resolved code
+    # recorded after the most recent diabetes diagnosis and up to and
+    # including the achievement date.
+    dataset.dmres_dat = last_matching_event(prior_events, codelists.dmres_cod).date
+
+    # Field number: 8
+    # DMMAX_DAT: Date of the most recent maximum tolerated diabetes treatment
+    # code up to and including the achievement date.
+    dataset.dmmax_dat = last_matching_event(prior_events, codelists.dmmax_cod).date
+
+    # Field number: 9
+    # IFCCHBA_DAT: Date of the most recent IFCC HbA1c monitoring range code up
+    # to and including the achievement date.
+    dataset.ifcchba_dat = last_matching_event(prior_events, codelists.ifcchbam_cod).date
+
+    # Field number: 10
+    # IFCCHBA_VAL: The IFCC HbA1c value associated with the most recent IFCC
+    # HbA1c monitoring range recording.
+    dataset.ifcchba_val = last_matching_event(
+        prior_events, codelists.ifcchbam_cod
+    ).numeric_value
+
+    # Field number: 11
+    # SERFRUC_DAT: Date of the most recent serum fructosamine code recorded up
+    # to and including the achievement date.
+    dataset.serfruc_dat = last_matching_event(prior_events, codelists.serfruc_cod).date
+
+    # Field number: 35
+    # BLDTESTDEC_DAT: Date the patient most recently chose not to receive a
+    # blood test up to and including the achievement date.
+    dataset.bldtestdec_dat = last_matching_event(
+        prior_events, codelists.bldtestdec_cod
+    ).date
+
+    # Field number: 43
+    # DMINVITE1_DAT: Date of the earliest invitation for a diabetes review on
+    # or after the quality service start date and up to and including the
+    # achievement date.
+    dminvite_events = get_events_on_or_between(
+        clinical_events,
+        codelists.dminvite_cod,
+        index_date - years(1),
+        index_date,
+    )
+    dataset.dminvite1_dat = (
+        dminvite_events.sort_by(dminvite_events.date).first_for_patient().date
     )
 
-    # 12 months registration preceding incident diagnosis date - combined primary and secondary care
-    dataset.add_column(f"{disease}_pre_reg", 
-        preceding_registration(getattr(dataset, f"{disease}_inc_date")
-        ).exists_for_patient()
+    # Field number: 44
+    # DMINVITE2_DAT: Date of the earliest invitation for a diabetes review
+    # recorded at least 7 days after the first invitation and up to and
+    # including the achievement date.
+    dminvite2_events = dminvite_events.where(
+        dminvite_events.date.is_after(dataset.dminvite1_dat + days(7))
+    )
+    dataset.dminvite2_dat = (
+        dminvite2_events.sort_by(dminvite2_events.date).first_for_patient().date
     )
 
-    # Age at diagnosis - combined primary and secondary care
-    dataset.add_column(f"{disease}_age",
-        (patients.age_on(getattr(dataset, f"{disease}_inc_date"))
-        )               
+    # Field number: 45
+    # DMPCADEC_DAT: Date the patient most recently chose not to receive
+    # diabetes quality indicator care up to and including the achievement date.
+    dataset.dmpcadec_dat = last_matching_event(
+        prior_events, codelists.dmpcadec_cod
+    ).date
+
+    # Field number: 46
+    # DMPCAPU_DAT: Most recent date that diabetes quality indicator care was
+    # deemed unsuitable for the patient up to and including the achievement
+    # date.
+    dataset.dmpcapu_dat = last_matching_event(prior_events, codelists.dmpcapu_cod).date
+
+    # Field number: 55
+    # MODFRAIL_DAT: Date of the most recent moderate frailty diagnosis up to and
+    # including the achievement date.
+    dataset.modfrail_dat = last_matching_event(
+        prior_events, codelists.modfrail_cod
+    ).date
+
+    # Field number: 59
+    # SEVFRAIL_DAT: Date of the most recent severe frailty diagnosis up to and
+    # including the achievement date.
+    dataset.sevfrail_dat = last_matching_event(
+        prior_events, codelists.sevfrail_cod
+    ).date
+
+    # Field number: 66
+    # FRAILLAT_DAT: The date of the latest frailty diagnosis up to and
+    # including the achievement date.
+    mildmodsev_frail_cod = (
+        codelists.mildfrail_cod + codelists.modfrail_cod + codelists.sevfrail_cod
+    )
+    dataset.fraillat_dat = last_matching_event(prior_events, mildmodsev_frail_cod).date
+
+    return dataset
+
+
+# GMS reg status: Select patients who meet either of the criteria below:
+# Registered for GMS prior to or on the achievement date and did not
+# subsequently deregister from GMS (currently registered for GMS).
+# Registered for GMS prior to or on the achievement date and subsequently
+# deregistered from GMS after the achievement date (previously registered for
+# GMS). (i.e. patients who were registered for GMS on the achievement date).
+# TODO Note that this currently does not follow the qualifying criteria in
+# the business rules for get_gms_registration_status. We do not check
+# whether a practice has signed up for GMS. This is reflected in the
+# current function name get_registration_status.
+def get_registration_status(index_date):
+    return practice_registration_as_of(index_date).exists_for_patient()
+
+
+# DM REGISTER (DM_REG)
+# DM_REG rule 1:
+# Pass to the next rule all patients from the specified population who meet
+# both of the criteria below:  Have a diabetes diagnosis in the patient record
+# up to and including the achievement date. Latest diabetes diagnosis is not
+# followed by a diabetes resolved code.
+def get_dm_reg_r1(dataset):
+    return (dataset.dmres_dat < dataset.dmlat_dat) | (
+        dataset.dmlat_dat.is_not_null() & dataset.dmres_dat.is_null()
     )
 
-    # Alive at incident diagnosis date - combined primary and secondary care
-    dataset.add_column(f"{disease}_alive_inc",
+
+# DM_REG rule 2:
+# Reject patients passed to this rule who are aged under 17 years old on the
+# achievement date.
+def get_dm_reg_r2(dataset):
+    return dataset.pat_age < 17
+
+
+# INDICATORS DM020 and DM021
+# DM020 (DM021) rule 1: Reject patients from the specified population whose
+# latest frailty diagnosis is moderate or severe. Pass all remaining patients
+# to the next rule.
+def get_dm020_r1(dataset):
+    return (dataset.fraillat_dat == dataset.sevfrail_dat) | (
+        dataset.fraillat_dat == dataset.modfrail_dat
+    )
+
+
+# DM020 (DM021) rule 2: Select patients passed to this rule who meet both of
+# the criteria below:
+# - Have their latest IFCC-HbA1c of 58 (75) mmol/mol or less.
+# - Have their latest IFCC-HbA1c reading was recorded in the 12 months leading
+# up to and including the payment period end date.
+def get_dm020_r2(dataset, index_date, ifcchba_cutoff_val):
+    return (
+        dataset.ifcchba_val.is_not_null()
+        & (dataset.ifcchba_val <= ifcchba_cutoff_val)
+        & dataset.ifcchba_dat.is_on_or_between(index_date - years(1), index_date)
+    )
+
+
+# DM020 (DM021) rule 3: Reject patients passed to this rule who did not have
+# their IFCC-HbA1c recorded during the current service year but did have serum
+# fructosamine recorded during the service year. Pass all remaining patients
+# to the next rule.
+def get_dm020_r3(dataset, index_date):
+    return (
         (
-            (dataset.date_of_death.is_after(getattr(dataset, f"{disease}_inc_date"))) |
-            dataset.date_of_death.is_null()
-        ).when_null_then(False)
+            dataset.ifcchba_dat.is_null()
+            | dataset.ifcchba_dat.is_on_or_before(index_date - years(1))
+        )
+        & dataset.serfruc_dat.is_not_null()
+        & dataset.serfruc_dat.is_after(index_date - years(1))
     )
 
-    # Incident date within window - primary care only
-    dataset.add_column(f"{disease}_inc_case_p",
-        (getattr(dataset, disease + "_prim_date").is_on_or_between(index_date, end_date)
-        ).when_null_then(False)
+
+# DM020 (DM021) rule 4: Reject patients passed to this rule who are on maximum
+# tolerated diabetes treatment in the 12 months leading up to and including
+# the payment period end date. Pass all remaining patients to the next rule.
+def get_dm020_r4(dataset, index_date):
+    return dataset.dmmax_dat.is_not_null() & dataset.dmmax_dat.is_after(
+        index_date - years(1)
     )
 
-    # 12 months registration preceding incident diagnosis date - primary care only
-    dataset.add_column(f"{disease}_pre_reg_p", 
-        preceding_registration(getattr(dataset, f"{disease}_prim_date")
-        ).exists_for_patient()
+
+# DM020 (DM021) rule 5: Reject patients passed to this rule for whom diabetes
+# quality indicator care was unsuitable in the 12 months leading up to and
+# including the payment period end date. Pass all remaining patients to the
+# next rule.
+def get_dm020_r5(dataset, index_date):
+    return dataset.dmpcapu_dat.is_not_null() & dataset.dmpcapu_dat.is_after(
+        index_date - years(1)
     )
 
-    # Age at diagnosis - primary care only
-    dataset.add_column(f"{disease}_age_p",
-        (patients.age_on(getattr(dataset, f"{disease}_prim_date"))
-        )               
+
+# DM020 (DM021) rule 6: Reject patients passed to this rule who chose not to
+# receive a blood test in the 12 months leading up to and including the payment
+# period end date. Pass all remaining patients to the next rule.
+def get_dm020_r6(dataset, index_date):
+    return dataset.bldtestdec_dat.is_not_null() & dataset.bldtestdec_dat.is_after(
+        index_date - years(1)
     )
 
-    # Alive at incident diagnosis date - primary care only
-    dataset.add_column(f"{disease}_alive_inc_p",
-        (
-            (dataset.date_of_death.is_after(getattr(dataset, f"{disease}_prim_date"))) |
-            dataset.date_of_death.is_null()
-        ).when_null_then(False)
+
+# DM020 (DM021) rule 7: Reject patients passed to this rule who chose not to
+# receive diabetes quality indicator care in the 12 months leading up to and
+# including the payment period end date. Pass all remaining patients to the
+# next rule.
+def get_dm020_r7(dataset, index_date):
+    return dataset.dmpcadec_dat.is_not_null() & dataset.dmpcadec_dat.is_after(
+        index_date - years(1)
     )
 
-    # Incident date within window - secondary care only
-    dataset.add_column(f"{disease}_inc_case_s",
-        (getattr(dataset, disease + "_sec_date").is_on_or_between(index_date, end_date)
-        ).when_null_then(False)
+
+# DM020 (DM021) rule 8: Reject patients passed to this rule who meet either of
+# the criteria below:
+# - Latest IFCC-HbA1c recorded in the 12 months leading up to and including the
+# payment period end date was above target levels (IFCC-HbA1c was above 58 (75)
+# mmol/mol), and was followed by two invitations for diabetes monitoring.
+# - Received two invitations for diabetes monitoring and had no IFCC-HbA1c
+# recorded during the 12 months leading up to and including the achievement
+# date.
+def get_dm020_r8(dataset, index_date, ifcchba_cutoff_val):
+    return (
+        dataset.ifcchba_val.is_not_null()
+        & (dataset.ifcchba_val > ifcchba_cutoff_val)
+        & dataset.ifcchba_dat.is_not_null()
+        & dataset.ifcchba_dat.is_on_or_between(index_date - years(1), index_date)
+        & (dataset.dminvite1_dat > dataset.ifcchba_dat)
+        & dataset.dminvite2_dat.is_not_null()
+    ) | (
+        (dataset.dminvite2_dat.is_not_null() & dataset.ifcchba_dat.is_null())
+        | dataset.ifcchba_dat.is_on_or_before(index_date - years(1))
     )
 
-    # 12 months registration preceding incident diagnosis date - secondary care only
-    dataset.add_column(f"{disease}_pre_reg_s", 
-        preceding_registration(getattr(dataset, f"{disease}_sec_date")
-        ).exists_for_patient()
+
+# DM020 (DM021) rule 9: Reject patients passed to this rule whose diabetes
+# diagnosis was in the 9 months leading up to and including the payment period
+# end date.
+def get_dm020_r9(dataset, index_date):
+    return dataset.dm_dat.is_not_null() & dataset.dm_dat.is_after(
+        index_date - months(9)
     )
 
-    # Age at diagnosis - secondary care only
-    dataset.add_column(f"{disease}_age_s",
-        (patients.age_on(getattr(dataset, f"{disease}_sec_date"))
-        )               
+
+# DM020 (DM021) rule 10: Reject patients passed to this rule who registered
+# with the practice in the 9 months leading up to and including the payment
+# period end date. Select the remaining patients.
+def get_dm020_r10(dataset, index_date):
+    return dataset.reg_dat.is_not_null() & dataset.reg_dat.is_after(
+        index_date - months(9)
     )
 
-    # Alive at incident diagnosis date - secondary care only
-    dataset.add_column(f"{disease}_alive_inc_s",
-        (
-            (dataset.date_of_death.is_after(getattr(dataset, f"{disease}_sec_date"))) |
-            dataset.date_of_death.is_null()
-        ).when_null_then(False)
-    )
+
+# Copy identical rules
+get_dm021_r1 = get_dm020_r1
+get_dm021_r2 = get_dm020_r2
+get_dm021_r3 = get_dm020_r3
+get_dm021_r4 = get_dm020_r4
+get_dm021_r5 = get_dm020_r5
+get_dm021_r6 = get_dm020_r6
+get_dm021_r7 = get_dm020_r7
+get_dm021_r8 = get_dm020_r8
+get_dm021_r9 = get_dm020_r9
+get_dm021_r10 = get_dm020_r10

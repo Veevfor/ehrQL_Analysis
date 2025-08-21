@@ -1,110 +1,30 @@
-# _________________________________________________
-# Purpose:
-# extract patient information as at each vaccination date
-# column set 1 = details of first vaccination event
-# column set 2 = details of second vaccination event
-# _________________________________________________
+from ehrql import create_dataset, codelist_from_csv
+from ehrql.tables.core import patients, medications, clinical_events
 
-# import libraries and functions
+cake_codelist = codelist_from_csv('codelists/cake.csv', column = 'code')
+parachuting_codelist = codelist_from_csv('codelists/parachuting.csv', column = 'code')
 
-from json import loads
-from pathlib import Path
-
-from ehrql import (
-    case,
-    create_dataset,
-    days,
-    when,
-    minimum_of,
-    maximum_of
-)
-from ehrql.tables.tpp import (
-  patients,
-  practice_registrations, 
-  vaccinations, 
-  clinical_events, 
-  ons_deaths,
-  addresses,
-)
-# import codelists
-from codelists import *
-
-
-study_dates = loads(
-    Path("analysis/0-lib/dates.json").read_text(),
-)
-
-# Change these in ./lib/dates.json if necessary
-start_date = study_dates["start_date"]
-end_date = study_dates["end_date"]
-
-#import function for clinical variables
-from variables_function import *
-
-# all covid-19 vaccination events
-covid_vaccinations = (
-  vaccinations
-  .where(vaccinations.target_disease.is_in(["SARS-2 CORONAVIRUS"]))
-  .sort_by(vaccinations.date)
-)
-
-# initialise dataset
 dataset = create_dataset()
-dataset.configure_dummy_data(population_size=1000)
 
-# define dataset poppulation
-dataset.define_population(
-   covid_vaccinations.exists_for_patient()
-   & (patients.age_on(end_date) >=16) # only include people who are aged 16 or over during at least one season
-)
+index_date = "2020-03-31"
 
+is_within_age_range = (patients.age_on(index_date) < 80) & (patients.age_on(index_date) > 17)
 
-# Arbitrary date guaranteed to be before any vaccination events of interest
-previous_vax_date = "1899-01-01"
+dataset.define_population(is_within_age_range)
 
-# loop over first, second, ..., nth vaccination event for each person
-# extract info on vaccination date and product, and basic demographics
-for i in range(1, 16+1):
+has_history_of_cake = medications.where(
+    medications.dmd_code.is_in(cake_codelist)
+    ).where(
+    medications.date.is_before(index_date)
+    ).exists_for_patient()
 
-    suffix = f"_{i}"
+has_history_of_parachuting = clinical_events.where(
+    clinical_events.snomedct_code.is_in(parachuting_codelist)
+    ).where(
+    clinical_events.date.is_before(index_date)
+    ).exists_for_patient()
 
-    ## --VARIABLES--
-    
-    # vaccine variables
-    current_vax = covid_vaccinations.where(covid_vaccinations.date>previous_vax_date).first_for_patient()
-    dataset.add_column(f"covid_vax_{i}_date", current_vax.date)
-    dataset.add_column(f"covid_vax_product_{i}", current_vax.product_name)
-    
-    # registration variables
-    registration = practice_registrations.for_patient_on(current_vax.date)
-    dataset.add_column(f"registered_{i}", registration.exists_for_patient())
-    dataset.add_column(f"deregistered_{i}_date", registration.end_date)
-    
-    # deomgraphic variables
-    demographic_variables(dataset = dataset, index_date = current_vax.date, var_name_suffix = suffix)
-    
-    # primis variables
-#    primis_variables(dataset = dataset, index_date = current_vax.date, var_name_suffix = suffix)
-#    dataset.add_column(f"primis_atrisk_{i}", primis_atrisk(current_vax.date)) # at risk 
-
-    # other clinical variables
-#    other_cx_variables(dataset = dataset, index_date = current_vax.date, var_name_suffix = suffix)
-
-    previous_vax_date = current_vax.date
-    
-
-
-### Add event-level data extract to test equivalence of ELD extract versus patient-level extract 
-
-# all covid-19 vaccination events
-# i don't think it's possible to restrict to first 16 events (as above for patient level data)
-# so I'll do this post-extract
-
-# covid_vaccinations_ELD = covid_vaccinations.where(covid_vaccinations.date>"1899-01-01")
-covid_vaccinations_ELD = covid_vaccinations 
-dataset.add_event_table(
-    "vaccinations",
-    vax_date = covid_vaccinations_ELD.date,
-    vax_product = covid_vaccinations_ELD.product_name,
-    age = patients.age_on(covid_vaccinations_ELD.date),
-)
+dataset.sex = patients.sex
+dataset.age = patients.age_on(index_date)
+dataset.cake = has_history_of_cake
+dataset.parachuting = has_history_of_parachuting

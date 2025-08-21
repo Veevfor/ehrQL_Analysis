@@ -1,68 +1,36 @@
-from ehrql import INTERVAL, case, create_measures, when, years
-from ehrql.tables.tpp import (
-    patients,
-    practice_registrations,
-    clinical_events,
-    medications,
+from datetime import date
+
+from databuilder.ehrql import Dataset, days, years
+from databuilder.tables.beta.tpp import (
+    patients, addresses, ons_deaths, sgss_covid_all_tests,
+    practice_registrations, clinical_events,
 )
+from databuilder.codes import SNOMEDCTCode
+from codelists import lc_codelists_combined
+from covariates import *
 
-from codelists import adhd_codelist, adhdrem_codelist
+# Defining the exposure groups (before matching)
 
-from variables_library import last_matching_event, add_datestamp
-
-measures = create_measures()
-measures.configure_dummy_data(population_size=10)
-
-# Population variables
-has_registration = practice_registrations.spanning(
-    INTERVAL.start_date, INTERVAL.end_date
-).exists_for_patient()
-
-sex = patients.sex
-age = patients.age_on(INTERVAL.start_date)
-age_band = case(
-    when((age >= 0) & (age <= 9)).then("0 to 9"),
-    when((age >= 10) & (age <= 17)).then("10 to 17"),
-    when((age >= 18) & (age <= 24)).then("18 to 24"),
-    when((age >= 25) & (age <= 34)).then("25 to 34"),
-    when((age >= 35) & (age <= 44)).then("35 to 44"),
-    when((age >= 45) & (age <= 54)).then("45 to 54"),
-    when((age >= 55) & (age <= 64)).then("55 to 64"),
-    when((age >= 65) & (age <= 74)).then("65 to 74"),
-    when(age >= 75).then("75 and over"),
-    when(age.is_null()).then("Missing"),
+dataset = Dataset()
+dataset.define_population(
+    (age>=18)
+    & (age<=100) 
+    & (registrations_number == 1) 
+    & registration.exists_for_patient() 
+    & lc_dx.exists_for_patient()
+    & (patients.sex.contains("male"))
+    & (death_date.is_after(lc_dx_date))
+    & (end_reg_date.is_after(lc_dx_date))
+    & (lc_cure_date.is_after(lc_dx_date))    
 )
-
-# In terms of dates -  Latest <= RPED
-selected_events = clinical_events.where(
-    clinical_events.date.is_on_or_before(INTERVAL.end_date)
-)
-
-has_adhd_cod_date = last_matching_event(selected_events, adhd_codelist).date
-
-has_adhdrem_cod_date = last_matching_event(selected_events, adhdrem_codelist).date
-
-# Select patients with a diagnosis of ADHD
-has_adhd_rule_1 = has_adhd_cod_date.is_not_null()
-
-# Select patients with:
-# (a) no remission code or
-# (b) a new ADHD diagnosis after the most recent remission code
-has_adhd_rule_2 = (has_adhdrem_cod_date.is_null()) | (
-    has_adhd_cod_date > has_adhdrem_cod_date
-)
-
-has_adhd_rule_1_and_2 = has_adhd_rule_1 & has_adhd_rule_2
-
-measures.define_measure(
-    name=f"Table_2_Prevalence_of_ADHD_Diagnosis" + add_datestamp(),
-    numerator=has_adhd_rule_1_and_2,
-    denominator=(
-        has_registration
-        & patients.sex.is_in(["male", "female"])
-        & (age <= 120)
-        & patients.is_alive_on(INTERVAL.end_date)
-    ),
-    group_by={"sex": sex, "age_band": age_band},
-    intervals=years(9).starting_on("2016-04-01"),
-)
+dataset.age = age
+dataset.sex = patients.sex
+dataset.region = registration.practice_nuts1_region_name
+dataset.registration_date = registration.start_date
+dataset.long_covid_dx = lc_dx.exists_for_patient().map_values({True: 1, False: 0})
+dataset.long_covid_dx_date = lc_dx_date
+dataset.index_date = lc_dx_date
+dataset.end_death = death_date
+dataset.end_deregist = end_reg_date
+dataset.end_lc_cure = lc_cure_date
+dataset.configure_dummy_data(population_size=50000)

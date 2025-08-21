@@ -1,72 +1,54 @@
-from ehrql import create_dataset, case, create_measures, when, years, months
+from ehrql import INTERVAL, create_measures, months
 from ehrql.tables.tpp import (
     patients,
-    practice_registrations,
     clinical_events,
-    medications,
+    practice_registrations,
+)
+from analysis.measures_definition_pf_breakdown import (
+    pharmacy_first_conditions_codes,
+    imd_quintile,
+)
+from codelists import pf_consultation_events_dict
+from config import (
+    start_date_measure_condition_provider,
+    monthly_intervals_measure_condition_provider,
+)
+from pf_variables_library import select_events
+
+measures = create_measures()
+measures.configure_dummy_data(population_size=1000)
+
+start_date = start_date_measure_condition_provider
+monthly_intervals = monthly_intervals_measure_condition_provider
+
+registration = practice_registrations.for_patient_on(INTERVAL.end_date)
+
+selected_events = select_events(
+    clinical_events, start_date=INTERVAL.start_date, end_date=INTERVAL.end_date
 )
 
-from variables_library import (
-    first_matching_event,
-    last_matching_event
-)
+# Create variable which contains boolean values of whether pharmacy first event exists for patient
+has_pharmacy_first = select_events(
+    selected_events,
+    codelist=pf_consultation_events_dict["pf_consultation_services_combined"],
+).exists_for_patient()
 
-from codelists import (
-    adhd_codelist,
-    adhdrem_codelist,
-    adhd_medication_codelist,
-)
+for condition_name, condition_code in pharmacy_first_conditions_codes.items():
+    condition_events = selected_events.where(
+        selected_events.snomedct_code.is_in(condition_code)
+    )
 
-dataset = create_dataset()
-dataset.configure_dummy_data(population_size=10000)
+    # Define the numerator as the count of events for the condition
+    numerator = condition_events.count_for_patient()
+    denominator = registration.exists_for_patient() & patients.sex.is_in(
+        ["male", "female"]
+    )
 
-# Date range
-start_date_point = "2016-04-01"
-end_date_point = "2025-04-01"
-
-# Population variables
-has_registration = practice_registrations.exists_for_patient()
-dataset.has_registration = has_registration
-
-dataset.sex = patients.sex
-
-dataset.date_of_birth = patients.date_of_birth
-
-# Picking the first date for dia and first date for med
-dataset.first_adhd_diagnosis_date = first_matching_event(
-    clinical_events, adhd_codelist
-).date
-
-dataset.last_mph_med_date = (
-    medications.where(True)
-    .where(medications.dmd_code.is_in(adhd_medication_codelist))
-    .where(medications.date.is_on_or_after(dataset.first_adhd_diagnosis_date))
-    .sort_by(medications.date)
-    .last_for_patient()
-    .date
-)
-
-dataset.year_of_medication = (dataset.last_mph_med_date).year
-dataset.month_of_medication = (dataset.last_mph_med_date).month
-
-#Computing the age at the point of medication
-dataset.age = patients.age_on(dataset.last_mph_med_date)
-
-dataset.age_band = case(
-    when((dataset.age >= 0) & (dataset.age <= 9)).then("0 to 9"),
-    when((dataset.age >= 10) & (dataset.age <= 17)).then("10 to 17"),
-    when((dataset.age >= 18) & (dataset.age <= 24)).then("18 to 24"),
-    when((dataset.age >= 25) & (dataset.age <= 34)).then("25 to 34"),
-    when(dataset.age >= 35).then("35 and over"),
-    when(dataset.age.is_null()).then("Missing"),
-)
-
-# Computing the population records
-dataset.define_population(
-    dataset.has_registration
-    & dataset.sex.is_in(["male", "female"])
-    & (dataset.age <= 120)
-    & dataset.first_adhd_diagnosis_date.is_not_null()
-    & dataset.last_mph_med_date.is_not_null()
-    & (dataset.last_mph_med_date >= dataset.first_adhd_diagnosis_date)
-)
+    # Measures for overall clinical services graph
+    measures.define_measure(
+        name=f"count_{condition_name}_total",
+        numerator=numerator,
+        denominator=denominator,
+        group_by={"pf_status": has_pharmacy_first, "imd": imd_quintile},
+        intervals=months(monthly_intervals).starting_on(start_date),
+    )

@@ -1,94 +1,87 @@
-from ehrql import (
-    case,
-    when,
-    minimum_of
+# Import functions that will be used for dataset definition
+from ehrql import create_dataset
+from ehrql import codelist_from_csv
+from ehrql import Path
+
+# Import the tables of the variables which you need to define the dataset
+from ehrql.tables.tpp import patients, practice_registrations, clinical_events
+
+## could use from ehrql.tables.core or from ehrql.tables.emis
+
+# Create an empty dataset - we will be adding columns to this, based on which we will filter data
+dataset = create_dataset()
+
+# Create objects containing codelists - these will be used to define the dataset
+codelist_path = Path("codelists")
+dm_cod = codelist_from_csv(
+    codelist_path / "nhsd-primary-care-domain-refsets-dm_cod.csv",
+    column="code",
 )
-# Bring table definitions from the TPP backend 
-from ehrql.tables.tpp import ( 
-    ons_deaths
+dmres_cod = codelist_from_csv(
+    codelist_path / "nhsd-primary-care-domain-refsets-dmres_cod.csv",
+    column="code",
 )
 
-# Codelists from codelists.py (which pulls all variables from the codelist folder)
-from codelists_rsd import *
+# Simpler:
+dm_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dm_cod.csv",
+    column="code",
+)
+dmres_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmres_cod.csv",
+    column="code",
+)
 
+# Create index date
+index_date = "2024-03-31"
 
-# Call functions from variable_helper_functions
-from variable_rsd_helper_functions import (
-    first_matching_event_clinical_snomed_between,
-    first_matching_event_clinical_ctv3_between,
-    first_matching_event_apc_between,
-    matching_death_between
+# Create a boolean vector for which patients were registered up until the index date
+registered = practice_registrations.for_patient_on(index_date).exists_for_patient()
+
+# However, unless we add this information to the dataset, we won't be able to filter based on it, using dataset.define_population
+##So first, we need to add a column to the dataset which defines which patients are registered
+dataset.registered = practice_registrations.for_patient_on(
+    index_date
+).exists_for_patient()
+
+# Derive patient age from the DOB and add to the dataset
+dataset.pat_age = patients.age_on(index_date)
+
+# Derive latest dates for Dx DM and Dx DM res for each patient, and add them to the dataset
+
+## Select the latest date with the diabetes code and add it to the dataset
+dataset.latest_dm = (
+    clinical_events.where(clinical_events.snomedct_code.is_in(dm_cod))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
 )
 
 
-def generate_rsd(index_date, end_date_exp, end_date_out):  
+## Select the latest date with the diabetes resolved code and add it to the dataset
+dataset.latest_dmres = (
+    clinical_events.where(clinical_events.snomedct_code.is_in(dmres_cod))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
+)
 
-# Defining just the rsd variables
+# Define the dataset (=cohort) - using the rules
 
-    ## RSD GP1
-    tmp_out_date_rsd_gp= (
-        first_matching_event_clinical_snomed_between(
-        rsd_snomed, index_date, end_date_out 
-        ).date
-    )
+##Rule 1
+### Has a diabetes diagnosis before the index date
+### Latest diabetes diagnosis is not followed by a diabetes resolved code.
 
-    ## RSD GP2
-    tmp_out_date_rsd_gp_new= (
-        first_matching_event_clinical_snomed_between(
-        rsd_snomed_new, index_date, end_date_out 
-        ).date
-    )
-    
-    ## RSD CTV3
-    tmp_out_date_rsd_ctv3 = (
-        first_matching_event_clinical_ctv3_between(
-            rsd_ctv3, index_date, end_date_out
-        ).date
-    )
+dm_reg_r1 = (
+    (dataset.latest_dm.is_not_null())
+    & (dataset.latest_dm < index_date)
+    & ((dataset.latest_dmres < dataset.latest_dm) | dataset.latest_dmres.is_null())
+)
 
-    ## RSD APC
-    tmp_out_date_rsd_apc= (
-        first_matching_event_apc_between(
-        rsd_icd10, index_date, end_date_out 
-        ).admission_date
-    )
+##Rule 2
+### Needs to be minimim 17 years old on the index date
 
-    ## RSD Death
-    tmp_out_date_rsd_death= case(
-        when(
-            matching_death_between(rsd_icd10, index_date, end_date_out)
-            ).then(ons_deaths.date)
-    )
+dm_reg_r2 = dataset.pat_age >= 17
 
-    out_date_rsd=minimum_of(
-        tmp_out_date_rsd_gp,
-        tmp_out_date_rsd_apc,
-        tmp_out_date_rsd_death
-    )
-
-
-# Start of Dictionary-----------------------------------------------------------------------------------------
-
-    ## Combine the variables into the final dictionary
-    dynamic_variables = dict(
-
-        # Outcomes----------------------------------------------------------------------------------------------------
-
-        ### ---First recording of the outcome in during the study period
-        out_date_rsd         = out_date_rsd,        # REM Sleep Disorder
-
-        ## Tmp GP
-        tmp_out_date_rsd_gp           = tmp_out_date_rsd_gp,              # REM Sleep Disorder
-        tmp_out_date_rsd_gp_new       = tmp_out_date_rsd_gp_new,          # REM Sleep Disorder
-        
-        ## Tmp CTV3
-        tmp_out_date_rsd_ctv3         = tmp_out_date_rsd_ctv3,            # REM Sleep Disorder
-
-        ## Tmp APC
-        tmp_out_date_rsd_apc          = tmp_out_date_rsd_apc,            # REM Sleep Disorder
-
-        ## Tmp Death
-        tmp_out_date_rsd_death        = tmp_out_date_rsd_death,        # REM Sleep Disorder
-    ) 
-    
-    return dynamic_variables
+# Create the population
+dataset.define_population(registered & dm_reg_r1 & dm_reg_r2)

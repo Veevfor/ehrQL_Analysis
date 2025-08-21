@@ -1,71 +1,41 @@
-from ehrql import create_dataset
-from ehrql.tables.tpp import (
-    patients,
-    practice_registrations,
-    clinical_events,
-    medications,
+from ehrql import INTERVAL, create_measures, months
+from ehrql.tables.tpp import clinical_events, patients, practice_registrations
+
+measures = create_measures()
+measures.configure_dummy_data(population_size=10000)
+
+# Dictionary of pharmacy first codes
+pharmacy_first_event_codes = {
+    # Community Pharmacist (CP) Consultation Service for minor illness (procedure)
+    "consultation_service": ["1577041000000109"],
+    # Pharmacy First service (qualifier value)
+    "pharmacy_first_service": ["983341000000102"],
+}
+
+registration = practice_registrations.for_patient_on(INTERVAL.end_date)
+
+# Select clinical events
+selected_events = clinical_events.where(
+    clinical_events.date.is_on_or_between(INTERVAL.start_date, INTERVAL.end_date)
 )
 
-from variables_library import first_matching_event
+# Count pharmacy first codes
+pharmacy_first_code_counts = {}
 
-from codelists import (
-    adhd_codelist,
-    adhd_medication_codelist,
-)
+for code_desc, code in pharmacy_first_event_codes.items():
+    count_codes_query = selected_events.where(
+        selected_events.snomedct_code.is_in(code)
+    ).count_for_patient()
+    pharmacy_first_code_counts[f"count_{code_desc}"] = count_codes_query
 
-dataset = create_dataset()
-dataset.configure_dummy_data(population_size=100000)
+# Define intervals and measures
+intervals = months(18).starting_on("2023-02-01")
 
-# Date range
-start_date = "2016-04-01"
-end_date = "2024-03-31"
-
-# Population variables
-has_registration = practice_registrations.spanning(
-    start_date, end_date
-).exists_for_patient()
-dataset.sex = patients.sex
-dataset.age = patients.age_on(end_date)
-
-# Filtering with the codelists
-has_adhd_event = clinical_events.where(
-    clinical_events.snomedct_code.is_in(adhd_codelist)
-).exists_for_patient()
-
-# Picking the last date for dia and first date for med
-dataset.first_adhd_diagnosis_date = first_matching_event(
-    clinical_events, adhd_codelist
-).date
-
-# Number of counts for ADHD diagonsis and readmission
-dataset.count_adhd_diagnoses = clinical_events.where(
-    clinical_events.snomedct_code.is_in(adhd_codelist)
-).count_for_patient()
-
-dataset.count_adhd_resolved = clinical_events.where(
-    clinical_events.snomedct_code.is_in(adhd_codelist)
-).count_for_patient()
-
-dataset.first_mph_med_date = (
-    medications.where(True)
-    .where(medications.dmd_code.is_in(adhd_medication_codelist))
-    .where(medications.date.is_on_or_after(dataset.first_adhd_diagnosis_date))
-    .sort_by(medications.date)
-    .first_for_patient()
-    .date
-)
-
-# Compute the date gap
-dataset.times_between_dia_med_weeks = (
-    dataset.first_mph_med_date - dataset.first_adhd_diagnosis_date
-).weeks
-
-# Computing the population records
-dataset.define_population(
-    has_registration
-    & dataset.sex.is_in(["male", "female"])
-    & (dataset.age <= 120)
-    & patients.is_alive_on(end_date)
-    & dataset.first_adhd_diagnosis_date.is_not_null()
-    & dataset.first_mph_med_date.is_not_null()
-)
+for measures_name, code_counts in pharmacy_first_code_counts.items():
+    measures.define_measure(
+        name=measures_name,
+        numerator=code_counts,
+        group_by={"practice_region": registration.practice_nuts1_region_name},
+        denominator=patients.exists_for_patient(),
+        intervals=intervals,
+    )

@@ -1,69 +1,86 @@
-# Function to check status of a condition within a specified time window
-from ehrql import months
+from ehrql import (
+    create_dataset,
+)
+# Bring table definitions from the TPP backend 
+from ehrql.tables.tpp import ( 
+    patients, 
+)
 
+from ehrql.query_language import table_from_file, PatientFrame, Series
 
-def check_pregnancy_status(index_date, selected_events, codelist):
-    return (
-        selected_events.where(selected_events.snomedct_code.is_in(codelist))
-        .where(
-            selected_events.date.is_on_or_between(index_date - months(1), index_date)
-        )
-        .exists_for_patient()
+from datetime import date
+
+# Create dataset
+
+def generate_dataset(index_date, end_date_exp, end_date_out):
+    dataset = create_dataset()
+    
+    dataset.define_population(
+        patients.date_of_birth.is_not_null()
     )
 
+# Configure dummy data
 
-# Function to count number of coded events within a specified time window
-def count_past_events(index_date, selected_events, codelist, num_months):
-    return (
-        selected_events.where(selected_events.snomedct_code.is_in(codelist))
-        .where(
-            selected_events.date.is_on_or_between(
-                index_date - months(num_months), index_date
-            )
-        )
-        .count_for_patient()
-    )
+    dataset.configure_dummy_data(population_size = 1000)
 
+# Import variables function
 
-# Function to get events linked to a specified codelist
-def select_events_from_codelist(event_frame, codelist):
-    selected_events = event_frame.where(event_frame.snomedct_code.is_in(codelist))
+    from variables_cohorts import generate_variables
 
-    return selected_events
+    variables = generate_variables(index_date, end_date_exp, end_date_out)
 
+    # Assign each variable to the dataset
 
-# Function to get events with specific consultation IDs
-def select_events_by_consultation_id(event_frame, consultation_ids):
-    selected_events = event_frame.where(
-        event_frame.consultation_id.is_in(consultation_ids)
-    )
-    return selected_events
+    for var_name, var_value in variables.items():
+        setattr(dataset, var_name, var_value)
 
+# Extract date variables for later pipelines
 
-# Function to get events within a time frame
-def select_events_between(event_frame, start_date, end_date):
-    selected_events = event_frame.where(
-        event_frame.date.is_on_or_between(start_date, end_date)
-    )
-    return selected_events
+    @table_from_file("output/dataset_definition/index_dates.csv.gz")
+    
+    class index_dates(PatientFrame):
+    # Vaccine category and eligibility variables
+        vax_cat_jcvi_group = Series(str)
+        vax_date_eligible = Series(date)
 
+    # General COVID vaccination dates
+        vax_date_covid_1 = Series(date)
+        vax_date_covid_2 = Series(date)
+        vax_date_covid_3 = Series(date)
 
-def select_events(
-    event_frame, codelist=None, consultation_ids=None, start_date=None, end_date=None
-):
-    """
-    Wrapper function to select events based on codelist, consultation IDs, or a date range.
-    Allows combining multiple selection criteria.
-    """
-    selected_events = event_frame
+    # Pfizer vaccine-specific dates
+        vax_date_Pfizer_1 = Series(date)
+        vax_date_Pfizer_2 = Series(date)
+        vax_date_Pfizer_3 = Series(date)
 
-    if codelist is not None:
-        selected_events = select_events_from_codelist(selected_events, codelist)
-    if consultation_ids is not None:
-        selected_events = select_events_by_consultation_id(
-            selected_events, consultation_ids
-        )
-    if start_date is not None and end_date is not None:
-        selected_events = select_events_between(selected_events, start_date, end_date)
+    # AstraZeneca vaccine-specific dates
+        vax_date_AstraZeneca_1 = Series(date)
+        vax_date_AstraZeneca_2 = Series(date)
+        vax_date_AstraZeneca_3 = Series(date)
 
-    return selected_events
+    # Moderna vaccine-specific dates
+        vax_date_Moderna_1 = Series(date)
+        vax_date_Moderna_2 = Series(date)
+        vax_date_Moderna_3 = Series(date)
+
+    # Censoring date due to death
+        cens_date_death = Series(date)
+
+    # Mapping all variables from index_dates to the dataset
+    dataset.vax_cat_jcvi_group     = index_dates.vax_cat_jcvi_group
+    dataset.vax_date_eligible      = index_dates.vax_date_eligible
+    dataset.vax_date_covid_1       = index_dates.vax_date_covid_1
+    dataset.vax_date_covid_2       = index_dates.vax_date_covid_2
+    dataset.vax_date_covid_3       = index_dates.vax_date_covid_3
+    dataset.vax_date_Pfizer_1      = index_dates.vax_date_Pfizer_1
+    dataset.vax_date_Pfizer_2      = index_dates.vax_date_Pfizer_2
+    dataset.vax_date_Pfizer_3      = index_dates.vax_date_Pfizer_3
+    dataset.vax_date_AstraZeneca_1 = index_dates.vax_date_AstraZeneca_1
+    dataset.vax_date_AstraZeneca_2 = index_dates.vax_date_AstraZeneca_2
+    dataset.vax_date_AstraZeneca_3 = index_dates.vax_date_AstraZeneca_3
+    dataset.vax_date_Moderna_1     = index_dates.vax_date_Moderna_1
+    dataset.vax_date_Moderna_2     = index_dates.vax_date_Moderna_2
+    dataset.vax_date_Moderna_3     = index_dates.vax_date_Moderna_3
+    dataset.cens_date_death        = index_dates.cens_date_death
+
+    return dataset

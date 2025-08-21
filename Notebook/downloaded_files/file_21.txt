@@ -1,187 +1,51 @@
-#################################################################
-# This code extracts monthly counts of people on personalised
-#   folloup pathways, stratified by relevant characteristics
-#################################################################
-
-
-from ehrql import months, INTERVAL, Measures
+import operator
+from functools import reduce # for function building, e.g. any_of
 from ehrql.tables.tpp import (
-    patients, 
-    practice_registrations,
-    opa)
+    apcs, 
+    clinical_events, 
+    medications, 
+    ons_deaths,
+    emergency_care_attendances,
+)
 
 
-# OPA checks
-check_opa = opa.where(
-        opa.appointment_date.is_on_or_between(INTERVAL.start_date, INTERVAL.end_date)
-    ).sort_by(
-        opa.appointment_date
-    ).exists_for_patient()
+# helper function
+def any_of(conditions):
+    return reduce(operator.or_, conditions)
 
-#consult_medium = check_opa.consultation_medium_used
-#attendance_status = check_opa.attendance_status
-#first_attendance = check_opa.first_attendance
-
-
-# For study
-# All OP visits that were attended
-all_opa = opa.where(
-        opa.appointment_date.is_on_or_between(INTERVAL.start_date, INTERVAL.end_date)
-        & opa.attendance_status.is_in(["5","6"])
+def first_matching_event_clinical_snomed_between(codelist, start_date, end_date, where=True):
+    return(
+        clinical_events.where(where)
+        .where(clinical_events.snomedct_code.is_in(codelist))
+        .where(clinical_events.date.is_on_or_between(start_date, end_date))
+        .sort_by(clinical_events.date)
+        .first_for_patient()
     )
 
-# All PIFU visits that were attended
-all_pfu = opa.where(
-        opa.appointment_date.is_on_or_between(INTERVAL.start_date, INTERVAL.end_date)
-        & opa.attendance_status.is_in(["5","6"])
-        & opa.outcome_of_attendance.is_in(["4","5"])
+def first_matching_event_apc_between(codelist, start_date, end_date, only_prim_diagnoses=False, where=True):
+    query = apcs.where(where).where(apcs.admission_date.is_on_or_between(start_date, end_date))
+    if only_prim_diagnoses:
+        query = query.where(
+            apcs.primary_diagnosis.is_in(codelist)
+        )
+    else:
+        query = query.where(apcs.all_diagnoses.contains_any_of(codelist))
+    return query.sort_by(apcs.admission_date).first_for_patient()
+  
+def first_matching_event_clinical_ctv3_between(codelist, start_date, end_date, where=True):
+    return(
+        clinical_events.where(where)
+        .where(clinical_events.ctv3_code.is_in(codelist))
+        .where(clinical_events.date.is_on_or_between(start_date, end_date))
+        .sort_by(clinical_events.date)
+        .first_for_patient()
     )
 
-# Any outpatient visit - total and personalised 
-any_opa = all_opa.exists_for_patient()
-any_pfu = all_pfu.exists_for_patient()
-
-
-# Number of outpatient visits - total and personalised
-count_opa = all_opa.opa_ident.count_distinct_for_patient()
-count_pfu = all_pfu.opa_ident.count_distinct_for_patient()
-
-
-# By treatment specialty (only include most common groups reported in public statistics)
-trt_func = ["100","101","110","120","130","140","150","160","170","300","301","320","330","340","400","410","430","502"]
-
-count_var = {}
-
-for code in trt_func:
-
-    count_var["any_opa_" + code] = all_opa.where(
-        all_opa.treatment_function_code.is_in([code])
-    ).exists_for_patient()
-
-    count_var["any_pfu_" + code] = all_pfu.where(
-        all_pfu.treatment_function_code.is_in([code])
-    ).exists_for_patient()
-
-    count_var["count_opa_" + code] = all_opa.where(
-        all_opa.treatment_function_code.is_in([code])
-    ).opa_ident.count_distinct_for_patient()
-    
-    count_var["count_pfu_" + code] = all_pfu.where(
-        all_pfu.treatment_function_code.is_in([code])
-    ).opa_ident.count_distinct_for_patient()
-
-
-# Region
-first_opa = all_opa.sort_by(
-        all_opa.appointment_date
-    ).first_for_patient()
-region = practice_registrations.for_patient_on(first_opa.appointment_date).practice_nuts1_region_name
-
-
-### Measures setup
-measures = Measures()
-measures.configure_disclosure_control(enabled=False)
-measures.configure_dummy_data(population_size=1000)
-
-denominator = (
-        (patients.age_on(INTERVAL.start_date) >= 18) 
-        & (patients.age_on(INTERVAL.start_date) < 110)
-        & ((patients.sex == "male") | (patients.sex == "female"))
-        & (patients.date_of_death.is_after(INTERVAL.start_date) | patients.date_of_death.is_null())
-        & (practice_registrations.for_patient_on(INTERVAL.start_date).exists_for_patient())
+def matching_death_between(codelist, start_date, end_date, where=True):
+    return(
+        ons_deaths.cause_of_death_is_in(codelist) & ons_deaths.date.is_on_or_between(start_date, end_date)
     )
 
-measures.define_defaults(
-    intervals=months(48).starting_on("2022-01-01")
-    )
-
-########################
-
-# Total outpatient visits
-measures.define_measure(
-    name="total_opa",
-    numerator=check_opa,
-    denominator=denominator,
-    )
-
-##################
-
-
-# Number of people with an outpatient visit
-measures.define_measure(
-    name="count_opa",
-    numerator=count_opa,
-    denominator=denominator,
-    )
-
-measures.define_measure(
-    name="patients_opa",
-    numerator=any_opa,
-    denominator=denominator,
-    )
-
-# Number of people with a personalised follow-up visit
-measures.define_measure(
-    name="count_pfu",
-    numerator=count_pfu,
-    denominator=denominator & any_opa,
-    )
-
-measures.define_measure(
-    name="patients_pfu",
-    numerator=any_pfu,
-    denominator=denominator & any_opa,
-    )
-
-measures.define_measure(
-    name="count_region_opa",
-    numerator=count_opa,
-    group_by={"region": region},
-    denominator=denominator,
-    )
-
-measures.define_measure(
-    name="count_region_pfu",
-    numerator=count_pfu,
-    group_by={"region": region},
-    denominator=denominator & any_opa,
-    )
-
-measures.define_measure(
-    name="patients_region_opa",
-    numerator=any_opa,
-    group_by={"region": region},
-    denominator=denominator,
-    )
-
-measures.define_measure(
-    name="patients_region_pfu",
-    numerator=any_pfu,
-    group_by={"region": region},
-    denominator=denominator & any_opa,
-    )
-
-
-###########################################
-
-for code in trt_func:
-    measures.define_measure(
-        name=f"any_opa_{code}",
-        numerator=count_var["any_opa_" + code],
-        denominator = denominator,
-    )
-    measures.define_measure(
-        name=f"any_pfu_{code}",
-        numerator=count_var["any_pfu_" + code],
-        denominator = denominator & any_opa,
-    )
-    measures.define_measure(
-        name=f"count_opa_{code}",
-        numerator=count_var["count_opa_" + code],
-        denominator = denominator,
-    )
-    measures.define_measure(
-        name=f"count_pfu_{code}",
-        numerator=count_var["count_pfu_" + code],
-        denominator = denominator & any_opa,
-    )
+# filter a codelist based on whether its values included a specified set of allowed values (include)
+def filter_codes_by_category(codelist, include):
+    return {k:v for k,v in codelist.items() if v in include}

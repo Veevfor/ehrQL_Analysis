@@ -1,318 +1,346 @@
-from ehrql import (
-    create_dataset,
-    years,
-    months,
-    days,
+###<codelists.py> for repo: <prophy_effects_Sotro_Molnup>
+##Description: This script extracts data for project 91:[Coverage, effectiveness and safety 
+##of neutralising monoclonal antibodies or antivirals for non-hospitalised patients with COVID-19]
+##   Date last updated: 10/05/2024 by  Qing Wen
+
+from ehrql import codelist_from_csv 
+
+# --- CODELISTS ---
+covid_icd10_codes = ["U071", "U072", "U099","U109"]
+#https://github.com/opensafely/documentation/discussions/1480
+
+## HIGH RISK GROUPS ----
+# dialysis
+dialysis_codes = codelist_from_csv(
+  "codelists/opensafely-dialysis.csv",
+   column = "CTV3ID"
 )
-from ehrql.tables.tpp import (
-    clinical_events,
-    patients,
-    practice_registrations,
+dialysis_icd10_codelist = codelist_from_csv(
+    "codelists/ukrr-dialysis-icd10.csv",
+    column="code"
+)
+dialysis_opcs4_codelist = codelist_from_csv(
+    "codelists/ukrr-dialysis-opcs-4.csv",
+    column="code"
+)
+# # kidney transplant
+kidney_transplant_codes = codelist_from_csv(
+  "codelists/opensafely-kidney-transplant.csv",
+  column = "CTV3ID"
+)
+# kidney_tx_icd10_codelist=codelist(["Z940"], system="icd10")
+kidney_tx_icd10_codelist = (["Z940"])
+
+kidney_tx_opcs4_codelist = codelist_from_csv(
+    "codelists/user-viyaasan-kidney-transplant-opcs-4.csv",
+    # system="opcs4",
+    column="code"
 )
 
-# Diabetes mellitus variable library
-# Business Rules for Quality and Outcomes Framework (QOF) 2021/22 (Version 46)
-# Clinical data extraction criteria
-from variable_lib_helper import (
-    first_matching_event,
-    last_matching_event,
-    age_as_of,
-    practice_registration_as_of,
-    get_events_on_or_between,
+# ### Sickle cell disease
+sickle_cell_disease_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-sickle-spl-atriskv4-snomed-ct.csv",
+   column = "code",
 )
 
-import codelists
+sickle_cell_disease_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-sickle-spl-hes-icd-10.csv",
+  column = "code",
+)
+
+# ### Solid cancer
+non_haematological_cancer_opensafely_snomed_codes = codelist_from_csv(
+  "codelists/opensafely-cancer-excluding-lung-and-haematological-snomed.csv",
+  column = "id",
+)
+non_haematological_cancer_opensafely_snomed_codes_new = codelist_from_csv(
+  "codelists/user-bangzheng-cancer-excluding-lung-and-haematological-snomed-new.csv",
+  column = "code",
+)
+lung_cancer_opensafely_snomed_codes = codelist_from_csv(
+  "codelists/opensafely-lung-cancer-snomed.csv", 
+  column = "id"
+)
+
+chemotherapy_radiotherapy_opensafely_snomed_codes = codelist_from_csv(
+  "codelists/opensafely-chemotherapy-or-radiotherapy-snomed.csv", 
+  column = "id"
+)
+
+# ### Patients with a haematological diseases
+haematopoietic_stem_cell_transplant_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-haematopoietic-stem-cell-transplant-snomed.csv", 
+  column = "code"
+)
+
+haematopoietic_stem_cell_transplant_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-haematopoietic-stem-cell-transplant-icd-10.csv", 
+  column = "code"
+)
+
+haematopoietic_stem_cell_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-haematopoietic-stem-cell-transplant-opcs4.csv", 
+  column = "code"
+)
+
+haematological_malignancies_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-haematological-malignancies-snomed.csv",
+  column = "code"
+)
+
+haematological_malignancies_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-haematological-malignancies-icd-10.csv", 
+  column = "code"
+)
+
+## Patients with renal disease
+## Immune-mediated inflammatory disorders (IMID)
+immunosuppresant_drugs_dmd_codes = codelist_from_csv(
+  "codelists/nhsd-immunosuppresant-drugs-pra-dmd.csv", 
+  column = "code"
+)
+
+immunosuppresant_drugs_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-immunosuppresant-drugs-pra-snomed.csv", 
+  column = "code"
+)
+
+oral_steroid_drugs_dmd_codes = codelist_from_csv(
+  "codelists/nhsd-oral-steroid-drugs-pra-dmd.csv",
+  column = "dmd_id",
+)
+
+oral_steroid_drugs_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-oral-steroid-drugs-snomed.csv", 
+  column = "code"
+)
+
+## Primary immune deficiencies
+immunosupression_nhsd_codes = codelist_from_csv(
+  "codelists/nhsd-immunosupression-pcdcluster-snomed-ct.csv",
+  column = "code",
+)
+immunosupression_nhsd_codes_new = codelist_from_csv(
+  "codelists/user-bangzheng-nhsd-immunosupression-pcdcluster-snomed-ct-new.csv",
+  column = "code",
+)
+
+## Solid organ transplant
+solid_organ_transplant_codes = codelist_from_csv(
+    "codelists/opensafely-solid-organ-transplantation-snomed.csv",
+    column = "id",
+)
+
+solid_organ_transplant_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-spl-atriskv4-snomed-ct.csv",
+  column = "code",
+)
+solid_organ_transplant_nhsd_snomed_codes_new = codelist_from_csv(
+  "codelists/user-bangzheng-nhsd-transplant-spl-atriskv4-snomed-ct-new.csv",
+  column = "code",
+)
+solid_organ_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+thymus_gland_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-thymus-gland-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+replacement_of_organ_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-replacement-of-organ-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+conjunctiva_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-conjunctiva-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+conjunctiva_y_codes_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-conjunctiva-y-codes-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+stomach_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-stomach-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_1_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_1-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_2_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_2-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_1_y_codes_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_1-y-codes-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_2_y_codes_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_2-y-codes-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+## CLINICAL/DEMOGRAPHIC COVARIATES ----
+
+ethnicity_codelist_with_categories = codelist_from_csv(
+    "codelists/opensafely-ethnicity-snomed-0removed.csv",
+    column = "snomedcode",
+    category_column = "Grouping_6"
+)
+
+## OTHER COVARIATES ----
+# Care home 
+care_home_primis_snomed_codes = codelist_from_csv(
+    "codelists/primis-covid19-vacc-uptake-longres.csv", 
+    column = "code")
+
+# carehome_primis_codes = codelist_from_csv(
+#   "codelists/primis-covid19-vacc-uptake-longres.csv", 
+#   column = "code",
+# )
 
 
-# Define a dataset including all variables needed for the diabetes mellitus (dm)
-def make_dm_dataset(index_date):
-    # Instantiate dataset
-    dataset = create_dataset()
+## Pregnancy
+pregnancy_primis_codes = codelist_from_csv(
+  "codelists/primis-covid19-vacc-uptake-preg.csv",
+  column = "code",
+)
 
-    # Extract prior events for further use in variable definitions below
-    prior_events = clinical_events.where(
-        clinical_events.date.is_on_or_before(index_date)
-    )
+## Pregnancy or delivery
+pregdel_primis_codes = codelist_from_csv(
+  "codelists/primis-covid19-vacc-uptake-pregdel.csv",
+  column = "code",
+)
 
-    # Field number: 2
-    # REG_DAT: The most recent date that the patient registered for GMS, where
-    # this registration occurred on or before the achievement date.
-    dataset.reg_dat = practice_registration_as_of(index_date).start_date
+# SUS-HES mabs
+#mabs_procedure_codes = ["X891", "X892"]  #system="opcs4"
 
-    # Field number: 3
-    # REG_DAT: The first occurrence of the patient deregistering from GMS
-    # following the latest GMS registration.
-    dataset.dereg_dat = practice_registration_as_of(dataset.reg_dat).end_date
+# drugs_consider_risk_codes = codelist_from_csv(
+#   "codelists/opensafely-nirmatrelvir-drug-interactions-3d3644f8-dmd.csv", 
+#   system = "snomed", 
+#   column = "dmd_id"
+# )
 
-    # Field number: 4
-    # PAT_AGE: The age of the patient in full years at the achievement date.
-    dataset.pat_age = age_as_of(index_date)
+# Chronic cardiac disease
+chronic_cardiac_dis_codes = codelist_from_csv(
+    "codelists/opensafely-chronic-cardiac-disease-snomed.csv",
+    column="id"
+)
 
-    # Field number: 5
-    # DM_DAT: Date of the first diabetes diagnosis up to and including the
-    # achievement date.
-    dataset.dm_dat = first_matching_event(prior_events, codelists.dm_cod).date
+# Chronic respiratory disease
+chronic_respiratory_dis_codes = codelist_from_csv(
+    "codelists/opensafely-chronic-respiratory-disease-snomed.csv",
+    column="id"
+)
 
-    # Field number: 6
-    # DMLAT_DAT: Date of the most recent diabetes diagnosis up to and
-    # including the achievement date.
-    dataset.dmlat_dat = last_matching_event(prior_events, codelists.dm_cod).date
+# Diabetes
+diabetes_codes = codelist_from_csv(
+    "codelists/opensafely-diabetes-snomed.csv",
+    #system="snomed",  #
+    column="id"
+)
+# Hypertension
+hypertension_codes = codelist_from_csv(
+    "codelists/opensafely-hypertension-snomed.csv",
+    #system="snomed",
+    column="id"
+)
 
-    # Field number: 7
-    # DMRES_DAT: Date of the most recent diabetes diagnosis resolved code
-    # recorded after the most recent diabetes diagnosis and up to and
-    # including the achievement date.
-    dataset.dmres_dat = last_matching_event(prior_events, codelists.dmres_cod).date
+# Dementia
+dementia_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-primary-care-domain-refsets-dem_cod.csv", 
+#   system = "snomed", 
+  column = "code",
+)
 
-    # Field number: 8
-    # DMMAX_DAT: Date of the most recent maximum tolerated diabetes treatment
-    # code up to and including the achievement date.
-    dataset.dmmax_dat = last_matching_event(prior_events, codelists.dmmax_cod).date
+# Learning disabilities
+wider_ld_primis_snomed_codes = codelist_from_csv(
+    "codelists/primis-covid19-vacc-uptake-learndis.csv", 
+#    system = "snomed", 
+    column = "code"
+)
+ ## Autism
+autism_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-primary-care-domain-refsets-autism_cod.csv",
+#  system = "snomed",
+  column = "code",
+)
 
-    # Field number: 9
-    # IFCCHBA_DAT: Date of the most recent IFCC HbA1c monitoring range code up
-    # to and including the achievement date.
-    dataset.ifcchba_dat = last_matching_event(prior_events, codelists.ifcchbam_cod).date
+## Serious mental illness
+serious_mental_illness_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-primary-care-domain-refsets-mh_cod.csv",
+#  system = "snomed",
+  column = "code",
+)
+## ELIGIBILITY CRITERIA VARIABLES ----
+## Onset of symptoms of COVID-19
+# covid_symptoms_snomed_codes = codelist_from_csv(
+#   "codelists/user-MillieGreen-covid-19-symptoms.csv",
+#   system = "snomed",
+#   column = "code",
+# )
 
-    # Field number: 10
-    # IFCCHBA_VAL: The IFCC HbA1c value associated with the most recent IFCC
-    # HbA1c monitoring range recording.
-    dataset.ifcchba_val = last_matching_event(
-        prior_events, codelists.ifcchbam_cod
-    ).numeric_value
+## Require hospitalisation for COVID-19
+# covid_icd10_codes = codelist_from_csv(
+#   "codelists/opensafely-covid-identification.csv",
+#   system = "icd10",
+#   column = "icd10_code",
+# )
 
-    # Field number: 11
-    # SERFRUC_DAT: Date of the most recent serum fructosamine code recorded up
-    # to and including the achievement date.
-    dataset.serfruc_dat = last_matching_event(prior_events, codelists.serfruc_cod).date
+## Housebound
+housebound_opensafely_snomed_codes = codelist_from_csv(
+    "codelists/opensafely-housebound.csv", 
+#    system = "snomed", 
+    column = "code"
+)
 
-    # Field number: 35
-    # BLDTESTDEC_DAT: Date the patient most recently chose not to receive a
-    # blood test up to and including the achievement date.
-    dataset.bldtestdec_dat = last_matching_event(
-        prior_events, codelists.bldtestdec_cod
-    ).date
+no_longer_housebound_opensafely_snomed_codes = codelist_from_csv(
+    "codelists/opensafely-no-longer-housebound.csv", 
+ #   system = "snomed", 
+    column = "code"
+)
 
-    # Field number: 43
-    # DMINVITE1_DAT: Date of the earliest invitation for a diabetes review on
-    # or after the quality service start date and up to and including the
-    # achievement date.
-    dminvite_events = get_events_on_or_between(
-        clinical_events,
-        codelists.dminvite_cod,
-        index_date - years(1),
-        index_date,
-    )
-    dataset.dminvite1_dat = (
-        dminvite_events.sort_by(dminvite_events.date).first_for_patient().date
-    )
+## Care home 
+care_home_primis_snomed_codes = codelist_from_csv(
+    "codelists/primis-covid19-vacc-uptake-longres.csv", 
+#    system = "snomed", 
+    column = "code")
 
-    # Field number: 44
-    # DMINVITE2_DAT: Date of the earliest invitation for a diabetes review
-    # recorded at least 7 days after the first invitation and up to and
-    # including the achievement date.
-    dminvite2_events = dminvite_events.where(
-        dminvite_events.date.is_after(dataset.dminvite1_dat + days(7))
-    )
-    dataset.dminvite2_dat = (
-        dminvite2_events.sort_by(dminvite2_events.date).first_for_patient().date
-    )
+## Vaccination declined
+# first_dose_declined = codelist_from_csv(
+#   "codelists/opensafely-covid-19-vaccination-first-dose-declined.csv",
+#   system = "snomed",
+#   column = "code",
+# )
 
-    # Field number: 45
-    # DMPCADEC_DAT: Date the patient most recently chose not to receive
-    # diabetes quality indicator care up to and including the achievement date.
-    dataset.dmpcadec_dat = last_matching_event(
-        prior_events, codelists.dmpcadec_cod
-    ).date
+## second_dose_declined = codelist_from_csv(
+#   "codelists/opensafely-covid-19-vaccination-second-dose-declined.csv",
+#   system = "snomed",
+#   column = "code",
+# )
 
-    # Field number: 46
-    # DMPCAPU_DAT: Most recent date that diabetes quality indicator care was
-    # deemed unsuitable for the patient up to and including the achievement
-    # date.
-    dataset.dmpcapu_dat = last_matching_event(prior_events, codelists.dmpcapu_cod).date
+# covid_vaccine_declined_codes = combine_codelists(
+#   first_dose_declined, second_dose_declined
+# )
 
-    # Field number: 55
-    # MODFRAIL_DAT: Date of the most recent moderate frailty diagnosis up to and
-    # including the achievement date.
-    dataset.modfrail_dat = last_matching_event(
-        prior_events, codelists.modfrail_cod
-    ).date
+# OTHER COVARIATES ----
+# ## Shielded
+# high_risk_primis_snomed_codes = codelist_from_csv(
+#     "codelists/primis-covid19-vacc-uptake-shield.csv", 
+#     system = "snomed", 
+#     column = "code")
 
-    # Field number: 59
-    # SEVFRAIL_DAT: Date of the most recent severe frailty diagnosis up to and
-    # including the achievement date.
-    dataset.sevfrail_dat = last_matching_event(
-        prior_events, codelists.sevfrail_cod
-    ).date
-
-    # Field number: 66
-    # FRAILLAT_DAT: The date of the latest frailty diagnosis up to and
-    # including the achievement date.
-    mildmodsev_frail_cod = (
-        codelists.mildfrail_cod + codelists.modfrail_cod + codelists.sevfrail_cod
-    )
-    dataset.fraillat_dat = last_matching_event(prior_events, mildmodsev_frail_cod).date
-
-    return dataset
-
-
-# GMS reg status: Select patients who meet either of the criteria below:
-# Registered for GMS prior to or on the achievement date and did not
-# subsequently deregister from GMS (currently registered for GMS).
-# Registered for GMS prior to or on the achievement date and subsequently
-# deregistered from GMS after the achievement date (previously registered for
-# GMS). (i.e. patients who were registered for GMS on the achievement date).
-# TODO Note that this currently does not follow the qualifying criteria in
-# the business rules for get_gms_registration_status. We do not check
-# whether a practice has signed up for GMS. This is reflected in the
-# current function name get_registration_status.
-def get_registration_status(index_date):
-    return practice_registration_as_of(index_date).exists_for_patient()
-
-
-# DM REGISTER (DM_REG)
-# DM_REG rule 1:
-# Pass to the next rule all patients from the specified population who meet
-# both of the criteria below:  Have a diabetes diagnosis in the patient record
-# up to and including the achievement date. Latest diabetes diagnosis is not
-# followed by a diabetes resolved code.
-def get_dm_reg_r1(dataset):
-    return (dataset.dmres_dat < dataset.dmlat_dat) | (
-        dataset.dmlat_dat.is_not_null() & dataset.dmres_dat.is_null()
-    )
-
-
-# DM_REG rule 2:
-# Reject patients passed to this rule who are aged under 17 years old on the
-# achievement date.
-def get_dm_reg_r2(dataset):
-    return dataset.pat_age < 17
-
-
-# INDICATORS DM020 and DM021
-# DM020 (DM021) rule 1: Reject patients from the specified population whose
-# latest frailty diagnosis is moderate or severe. Pass all remaining patients
-# to the next rule.
-def get_dm020_r1(dataset):
-    return (dataset.fraillat_dat == dataset.sevfrail_dat) | (
-        dataset.fraillat_dat == dataset.modfrail_dat
-    )
-
-
-# DM020 (DM021) rule 2: Select patients passed to this rule who meet both of
-# the criteria below:
-# - Have their latest IFCC-HbA1c of 58 (75) mmol/mol or less.
-# - Have their latest IFCC-HbA1c reading was recorded in the 12 months leading
-# up to and including the payment period end date.
-def get_dm020_r2(dataset, index_date, ifcchba_cutoff_val):
-    return (
-        dataset.ifcchba_val.is_not_null()
-        & (dataset.ifcchba_val <= ifcchba_cutoff_val)
-        & dataset.ifcchba_dat.is_on_or_between(index_date - years(1), index_date)
-    )
-
-
-# DM020 (DM021) rule 3: Reject patients passed to this rule who did not have
-# their IFCC-HbA1c recorded during the current service year but did have serum
-# fructosamine recorded during the service year. Pass all remaining patients
-# to the next rule.
-def get_dm020_r3(dataset, index_date):
-    return (
-        (
-            dataset.ifcchba_dat.is_null()
-            | dataset.ifcchba_dat.is_on_or_before(index_date - years(1))
-        )
-        & dataset.serfruc_dat.is_not_null()
-        & dataset.serfruc_dat.is_after(index_date - years(1))
-    )
-
-
-# DM020 (DM021) rule 4: Reject patients passed to this rule who are on maximum
-# tolerated diabetes treatment in the 12 months leading up to and including
-# the payment period end date. Pass all remaining patients to the next rule.
-def get_dm020_r4(dataset, index_date):
-    return dataset.dmmax_dat.is_not_null() & dataset.dmmax_dat.is_after(
-        index_date - years(1)
-    )
-
-
-# DM020 (DM021) rule 5: Reject patients passed to this rule for whom diabetes
-# quality indicator care was unsuitable in the 12 months leading up to and
-# including the payment period end date. Pass all remaining patients to the
-# next rule.
-def get_dm020_r5(dataset, index_date):
-    return dataset.dmpcapu_dat.is_not_null() & dataset.dmpcapu_dat.is_after(
-        index_date - years(1)
-    )
-
-
-# DM020 (DM021) rule 6: Reject patients passed to this rule who chose not to
-# receive a blood test in the 12 months leading up to and including the payment
-# period end date. Pass all remaining patients to the next rule.
-def get_dm020_r6(dataset, index_date):
-    return dataset.bldtestdec_dat.is_not_null() & dataset.bldtestdec_dat.is_after(
-        index_date - years(1)
-    )
-
-
-# DM020 (DM021) rule 7: Reject patients passed to this rule who chose not to
-# receive diabetes quality indicator care in the 12 months leading up to and
-# including the payment period end date. Pass all remaining patients to the
-# next rule.
-def get_dm020_r7(dataset, index_date):
-    return dataset.dmpcadec_dat.is_not_null() & dataset.dmpcadec_dat.is_after(
-        index_date - years(1)
-    )
-
-
-# DM020 (DM021) rule 8: Reject patients passed to this rule who meet either of
-# the criteria below:
-# - Latest IFCC-HbA1c recorded in the 12 months leading up to and including the
-# payment period end date was above target levels (IFCC-HbA1c was above 58 (75)
-# mmol/mol), and was followed by two invitations for diabetes monitoring.
-# - Received two invitations for diabetes monitoring and had no IFCC-HbA1c
-# recorded during the 12 months leading up to and including the achievement
-# date.
-def get_dm020_r8(dataset, index_date, ifcchba_cutoff_val):
-    return (
-        dataset.ifcchba_val.is_not_null()
-        & (dataset.ifcchba_val > ifcchba_cutoff_val)
-        & dataset.ifcchba_dat.is_not_null()
-        & dataset.ifcchba_dat.is_on_or_between(index_date - years(1), index_date)
-        & (dataset.dminvite1_dat > dataset.ifcchba_dat)
-        & dataset.dminvite2_dat.is_not_null()
-    ) | (
-        (dataset.dminvite2_dat.is_not_null() & dataset.ifcchba_dat.is_null())
-        | dataset.ifcchba_dat.is_on_or_before(index_date - years(1))
-    )
-
-
-# DM020 (DM021) rule 9: Reject patients passed to this rule whose diabetes
-# diagnosis was in the 9 months leading up to and including the payment period
-# end date.
-def get_dm020_r9(dataset, index_date):
-    return dataset.dm_dat.is_not_null() & dataset.dm_dat.is_after(
-        index_date - months(9)
-    )
-
-
-# DM020 (DM021) rule 10: Reject patients passed to this rule who registered
-# with the practice in the 9 months leading up to and including the payment
-# period end date. Select the remaining patients.
-def get_dm020_r10(dataset, index_date):
-    return dataset.reg_dat.is_not_null() & dataset.reg_dat.is_after(
-        index_date - months(9)
-    )
-
-
-# Copy identical rules
-get_dm021_r1 = get_dm020_r1
-get_dm021_r2 = get_dm020_r2
-get_dm021_r3 = get_dm020_r3
-get_dm021_r4 = get_dm020_r4
-get_dm021_r5 = get_dm020_r5
-get_dm021_r6 = get_dm020_r6
-get_dm021_r7 = get_dm020_r7
-get_dm021_r8 = get_dm020_r8
-get_dm021_r9 = get_dm020_r9
-get_dm021_r10 = get_dm020_r10
+# not_high_risk_primis_snomed_codes = codelist_from_csv(
+#     "codelists/primis-covid19-vacc-uptake-nonshield.csv", 
+#     system = "snomed", 
+#     column = "code")
+    

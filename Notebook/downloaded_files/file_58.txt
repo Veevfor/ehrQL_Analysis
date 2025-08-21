@@ -1,57 +1,70 @@
-from ehrql import INTERVAL, case, create_measures, when, years
+from ehrql import INTERVAL, create_measures, months
 from ehrql.tables.tpp import (
     patients,
-    practice_registrations,
     clinical_events,
-    medications,
+    practice_registrations,
 )
+from ehrql.tables.raw.tpp import medications
 
-from codelists import adhd_codelist, adhdrem_codelist
+from config import start_date_measure_med_counts, monthly_intervals_measure_med_counts
+from codelists import (
+    pf_consultation_events_dict,
+    pf_med_codelist,
+)
+from pf_variables_library import select_events
 
-from variables_library import last_matching_event, add_datestamp
+# Script taken from Pharmacy First Data Development (for top 10 PF meds table)
 
 measures = create_measures()
-measures.configure_dummy_data(population_size=10)
+measures.configure_dummy_data(population_size=1000)
 
-# Population variables
-has_registration = practice_registrations.spanning(
-    INTERVAL.start_date, INTERVAL.end_date
-).exists_for_patient()
+start_date = start_date_measure_med_counts
+monthly_intervals = monthly_intervals_measure_med_counts
 
-sex = patients.sex
-age = patients.age_on(INTERVAL.start_date)
-age_band = case(
-    when((age >= 0) & (age <= 9)).then("0 to 9"),
-    when((age >= 10) & (age <= 17)).then("10 to 17"),
-    when((age >= 18) & (age <= 24)).then("18 to 24"),
-    when((age >= 25) & (age <= 34)).then("25 to 34"),
-    when((age >= 35) & (age <= 44)).then("35 to 44"),
-    when((age >= 45) & (age <= 54)).then("45 to 54"),
-    when((age >= 55) & (age <= 64)).then("55 to 64"),
-    when((age >= 65) & (age <= 74)).then("65 to 74"),
-    when(age >= 75).then("75 and over"),
-    when(age.is_null()).then("Missing"),
+registration = practice_registrations.for_patient_on(INTERVAL.end_date)
+
+# Select Pharmacy First events during interval date range
+pharmacy_first_events = select_events(
+    clinical_events, start_date=INTERVAL.start_date, end_date=INTERVAL.end_date
+).where(
+    clinical_events.snomedct_code.is_in(
+        pf_consultation_events_dict["pf_consultation_services_combined"]
+    )
 )
 
-# In terms of dates -  Latest <= RPED
-selected_events = clinical_events.where(
-    clinical_events.date.is_on_or_before(INTERVAL.end_date)
+pharmacy_first_ids = pharmacy_first_events.consultation_id
+has_pf_consultation = pharmacy_first_events.exists_for_patient()
+
+# Select Pharmacy First consultations during interval date range
+selected_medications = select_events(
+    medications, start_date=INTERVAL.start_date, end_date=INTERVAL.end_date
+).where(medications.consultation_id.is_in(pharmacy_first_ids))
+
+# First medication for each patient
+first_selected_medication = (
+    selected_medications.sort_by(selected_medications.date).first_for_patient().dmd_code
 )
+# Boolean variable that selected medication is part of pharmacy first med codelists
+has_pharmacy_first_medication = first_selected_medication.is_in(pf_med_codelist)
 
-has_adhdrem_cod_date = last_matching_event(selected_events, adhdrem_codelist).date
+# Numerator, patients with a PF medication
+# This allows me to count all (first) medications linked to a PF consultation
+numerator = first_selected_medication.is_not_null()
 
-#Rule being remission date must come after the condeition date 
-has_adhdrem_rule = has_adhdrem_cod_date.is_not_null()
+# Denominator, registered patients (f/m) with a PF consultation
+denominator = (
+    registration.exists_for_patient()
+    & patients.sex.is_in(["male", "female"])
+    & has_pf_consultation
+)
 
 measures.define_measure(
-    name=f"Table_2_Prevalence_of_ADHD_Remission" + add_datestamp(),
-    numerator=has_adhdrem_rule,
-    denominator=(
-        has_registration
-        & patients.sex.is_in(["male", "female"])
-        & (age <= 120)
-        & patients.is_alive_on(INTERVAL.end_date)
-    ),
-    group_by={"sex": sex, "age_band": age_band},
-    intervals=years(3).starting_on("2021-04-01"),
+    name="pf_medication_count",
+    numerator=first_selected_medication.is_not_null(),
+    denominator=denominator,
+    group_by={
+        "dmd_code": first_selected_medication,
+        "pharmacy_first_med": has_pharmacy_first_medication,
+    },
+    intervals=months(monthly_intervals).starting_on(start_date),
 )

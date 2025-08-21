@@ -1,101 +1,100 @@
-from ehrql import create_dataset, months, days
-from ehrql.tables.tpp import patients, clinical_events
+from ehrql import codelist_from_csv
 
-from datetime import date
 
-from codelists import pharmacy_first_clinical_pathways_cod
-
-dataset = create_dataset()
-dataset.configure_dummy_data(population_size=1000)
-
-dataset.define_population(patients.exists_for_patient())
-
-# Dictionary of pharmacy first codes
-pharmacy_first_events_dict = {
-    # Community Pharmacist (CP) Consultation Service for minor illness (procedure)
-    "comm_pharm_consultation_service": ["1577041000000109"],
-    # Pharmacy First service (qualifier value)
-    "pharm_first_service": ["983341000000102"],
-}
-
-pharmacy_first_event_codes = [
-    code for codelist in pharmacy_first_events_dict.values() for code in codelist
-]
-
-# https://www.england.nhs.uk/primary-care/pharmacy/pharmacy-first/
-# For further projects we should review if choosing the actual start date
-# will give us the most accurate cut-off in OpenSAFELY
-pharmacy_first_launch_date = date(2024, 2, 1)
-
-# Time interval for selecting medications pre and post Pharmacy First launch date
-time_interval = months(6)
-
-pharmacy_first_ids = clinical_events.where(
-    clinical_events.snomedct_code.is_in(pharmacy_first_event_codes)
-).consultation_id
-
-pharmacy_first_dates = clinical_events.where(
-    clinical_events.snomedct_code.is_in(pharmacy_first_event_codes)
-).date
-
-# Select clinical events pre and post PF launch date
-selected_all_events_pre = clinical_events.where(
-    clinical_events.date.is_on_or_between(
-        pharmacy_first_launch_date - time_interval,
-        pharmacy_first_launch_date - days(1),
-    )
-).sort_by(clinical_events.date)
-
-selected_pfid_events_pre = selected_all_events_pre.where(
-    clinical_events.consultation_id.is_in(pharmacy_first_ids)
+# Cluster name: DM_COD
+# Description: Diabetes mellitus codes
+# Refset ID: ^999004691000230108
+dm_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dm_cod.csv",
+    column="code",
 )
 
-selected_pfdate_events_pre = selected_all_events_pre.where(
-    clinical_events.date.is_in(pharmacy_first_dates)
+# Cluster name: DMRES_COD
+# Description: Diabetes resolved codes
+# Refset ID: ^999003371000230102
+dmres_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmres_cod.csv",
+    column="code",
 )
 
-selected_all_events_post = clinical_events.where(
-    clinical_events.date.is_on_or_between(
-        pharmacy_first_launch_date, pharmacy_first_launch_date + time_interval
-    )
-).sort_by(clinical_events.date)
-
-selected_pfid_events_post = selected_all_events_post.where(
-    clinical_events.consultation_id.is_in(pharmacy_first_ids)
+# Cluster name: DMINVITE_COD
+# Description: Invite for diabetes care review codes
+# Refset ID: ^999012371000230109
+dminvite_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dminvite_cod.csv",
+    column="code",
 )
 
-selected_pfdate_events_post = selected_all_events_post.where(
-    clinical_events.date.is_in(pharmacy_first_dates)
+# Cluster name: DMMAX_COD
+# Description: Codes for maximum tolerated diabetes treatment
+# Refset ID: ^999010651000230109
+dmmax_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmmax_cod.csv",
+    column="code",
 )
 
-selected_events_dict = {
-    "pre_all": selected_all_events_pre,
-    "pre_pfid": selected_pfid_events_pre,
-    "pre_pfdate": selected_pfdate_events_pre,
-    "post_all": selected_all_events_post,
-    "post_pfid": selected_pfid_events_post,
-    "post_pfdate": selected_pfdate_events_post,
-}
+# Cluster name: DMPCAPU_COD
+# Description: Codes for diabetes quality indicator care unsuitable for patient
+# Refset ID: ^999010731000230107
+dmpcapu_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmpcapu_cod.csv",
+    column="code",
+)
 
-pf_codelists_dict = {
-    "pf_events": pharmacy_first_event_codes,
-    "pf_pathways": pharmacy_first_clinical_pathways_cod,
-}
+# Cluster name: IFCCHBAM_COD
+# Description: IFCC HbA1c monitoring range codes
+# Refset ID: ^999003251000230103
+ifcchbam_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-ifcchbam_cod.csv",
+    column="code",
+)
 
-# Count distinct pharmacy first consultations per patient
-for time_interval_desc, selected_events in selected_events_dict.items():
-    count_distinct_consultations_query = (
-        selected_events.consultation_id.count_distinct_for_patient()
-    )
-    dataset.add_column(
-        f"{time_interval_desc}_count_distinct_ids",
-        count_distinct_consultations_query,
-    )
+# Cluster name: MILDFRAIL_COD
+# Description: Mild frailty diagnosis codes
+# Refset ID: ^999013531000230106
+mildfrail_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-mildfrail_cod.csv",
+    column="code",
+)
 
-# Count pharmacy first codes
-for code_desc, code in pf_codelists_dict.items():
-    for time_interval_desc, selected_events in selected_events_dict.items():
-        count_codes_query = selected_events.where(
-            selected_events.snomedct_code.is_in(code)
-        ).count_for_patient()
-        dataset.add_column(f"{time_interval_desc}_count_{code_desc}", count_codes_query)
+# Cluster name: MODFRAIL_COD
+# Description: Moderate frailty diagnosis codes
+# Refset ID: ^999013571000230108
+modfrail_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-modfrail_cod.csv",
+    column="code",
+)
+
+# Cluster name: SERFRUC_COD
+# Description: Serum fructosamine codes
+# Refset ID: ^999005691000230107
+serfruc_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-serfruc_cod.csv",
+    column="code",
+)
+
+# Cluster name: SEVFRAIL_COD
+# Description: Severe frailty diagnosis codes
+# Refset ID: ^999012131000230109
+sevfrail_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-sevfrail_cod.csv",
+    column="code",
+)
+
+# Cluster name: BLDTESTDEC_COD
+# Description: Codes indicating the patient has chosen not to receive a blood test
+# Refset ID: ^999011611000230101
+bldtestdec_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-bldtestdec_cod.csv",
+    column="code",
+)
+
+
+# Cluster name: DMPCADEC_COD
+# Description: Date the patient most recently chose not to receive diabetes quality
+# indicator care up to and including the achievement date.
+# Refset ID: ^999010691000230104
+dmpcadec_cod = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmpcadec_cod.csv",
+    column="code",
+)

@@ -1,10 +1,23 @@
-from ehrql import Dataset
-from ehrql.tables.beta.core import patients
+from ehrql import create_dataset
+from ehrql.tables.core import patients
+from ehrql.tables.tpp import addresses
 
-index_date = "2020-03-31"
+dataset = create_dataset()
+age = patients.age_on("2024-01-01")
 
-dataset = Dataset()
+possible_msoas = ["E02000001", "E02000002", "E02000003", "E02000004"]
 
-dataset.age = patients.age_on(index_date)
+address = (
+    addresses.where(addresses.msoa_code.is_in(possible_msoas))
+    .sort_by(addresses.end_date)
+    .last_for_patient()
+)
 
-dataset.define_population((dataset.age > 18))
+no_address = ~addresses.exists_for_patient()
+
+dataset.age = age
+dataset.msoa = address.msoa_code
+
+dataset.define_population(
+    patients.exists_for_patient() & (address.exists_for_patient() | no_address)
+)

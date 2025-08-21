@@ -1,77 +1,73 @@
-################################################################################
-# This script defines and extracts relevant variables for people with a completed
-# RTT pathway from May 2021 - Apr 2022 regardless of treatment type/specialty
-################################################################################
+from ehrql import INTERVAL, create_measures, months, codelist_from_csv, case, when
+from ehrql.tables.tpp import practice_registrations, clinical_events, patients
+
+# Instantiate measures
+measures = create_measures()
+
+# Import codelists
+dep_codelist = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-depr_cod.csv",
+    column="code",
+)
+
+depres_codelist = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-depres_cod.csv",
+    column="code",
+)
+
+# Important dates
+# Quality Service Start Date
+qs_start_date = "2023-04-01"
+
+# Have their latest first or new episode of depression on or after 1 st April 2006
+min_date = "2006-04-01"
+
+# Inclusion criteria
+has_registration = practice_registrations.spanning(
+    INTERVAL.start_date, INTERVAL.end_date
+).exists_for_patient()
+
+# Create disease variables
+# - depr_dat = Latest date of depression diagnosis
+# - depres_dat = Latest depression resolved date
+# - pat_age = Age at quality service start date
+depr_dat = (
+    (clinical_events.where(clinical_events.snomedct_code.is_in(dep_codelist)))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
+)
+depres_dat = (
+    clinical_events.where(clinical_events.snomedct_code.is_in(depres_codelist))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
+)
+pat_age = patients.age_on(INTERVAL.start_date)
 
 
-from ehrql import create_dataset, case, when, days, years, minimum_of
-from ehrql.tables.tpp import (
-    patients, 
-    medications, 
-    addresses,
-    practice_registrations,
-    clinical_events,
-    wl_clockstops)
+# Creating rules
+dep1_reg_r1 = (depr_dat.is_on_or_after(min_date)) & (depres_dat.is_null())
+dep1_reg_r2 = pat_age >= 18
 
-import codelists
+# Define measures
+dep_in_interval = depr_dat.is_during(INTERVAL)
 
-dataset = create_dataset()
-dataset.configure_dummy_data(population_size=10000)
+# Stratification groups
+age_band = case(
+    when((pat_age >= 18) & (pat_age <= 21)).then("Young adult"),
+    when((pat_age >= 22) & (pat_age <= 64)).then("Adult"),
+    when(pat_age >= 65).then("Elderly"),
+)
 
-#### Waiting list variables ####
-
-# WL data - exclude rows with missing dates/dates outside study period/end date before start date
-clockstops = wl_clockstops.where(
-        wl_clockstops.referral_to_treatment_period_end_date.is_on_or_between("2021-05-01", "2022-04-30")
-        & wl_clockstops.week_ending_date.is_on_or_between("2021-05-01", "2022-04-30")
-    )
-
-# Number of RTT pathways per person
-dataset.count_rtt_rows = clockstops.count_for_patient()
-dataset.count_rtt_start_date = clockstops.referral_to_treatment_period_start_date.count_distinct_for_patient()
-dataset.count_patient_id = clockstops.pseudo_patient_pathway_identifier.count_distinct_for_patient()
-dataset.count_organisation_id = clockstops.pseudo_organisation_code_patient_pathway_identifier_issuer.count_distinct_for_patient()
-dataset.count_referral_id = clockstops.pseudo_referral_identifier.count_distinct_for_patient()
-
-
-# Latest waiting list
-#   Sort by IDs and start date to identify unique RTT pathways
-last_clockstops = clockstops.sort_by(
-        clockstops.referral_to_treatment_period_end_date,
-        clockstops.referral_to_treatment_period_start_date,
-        clockstops.pseudo_referral_identifier,
-        clockstops.pseudo_patient_pathway_identifier,
-        clockstops.pseudo_organisation_code_patient_pathway_identifier_issuer
-    ).last_for_patient()
-
-dataset.rtt_start_date = last_clockstops.referral_to_treatment_period_start_date
-dataset.rtt_end_date = last_clockstops.referral_to_treatment_period_end_date
-
-
-#### Censoring dates ####
-
-# Registered 6 months before WL start
-registrations = practice_registrations.spanning(
-        dataset.rtt_start_date - days(182), dataset.rtt_end_date
-    ).sort_by(
-        practice_registrations.end_date
-    ).last_for_patient()
-
-reg_end_date = registrations.end_date
-dod = patients.date_of_death
-dataset.end_date = minimum_of(reg_end_date, dod, dataset.rtt_end_date + days(182))
-
-
-#### Demographics ####
-
-dataset.age = patients.age_on(dataset.rtt_start_date)
-dataset.sex = patients.sex
-
-
-#### DEFINE POPULATION ####
-
-dataset.define_population(
-    dataset.end_date.is_on_or_after(dataset.rtt_end_date)
-    & registrations.exists_for_patient()
-    & last_clockstops.exists_for_patient()
+# Create measures
+measures.define_measure(
+    name="monthly_prevalence",
+    numerator=dep_in_interval,
+    denominator=has_registration & dep1_reg_r1 & dep1_reg_r2,
+    intervals=months(12).starting_on(qs_start_date),
+    group_by={
+        "sex": patients.sex,
+        "age": age_band,
+    },
 )

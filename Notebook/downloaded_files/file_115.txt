@@ -1,160 +1,295 @@
-from ehrql import (
-    INTERVAL, 
-    case, 
-    create_measures, 
-    when, 
-    years
+# ehrQL codelists
+from ehrql import codelist_from_csv
+
+# Demographics
+ethnicity_codes = codelist_from_csv(
+    "codelists/opensafely-ethnicity-snomed-0removed.csv",
+    column="code",
+    category_column="Grouping_6",
 )
 
-from ehrql.tables.tpp import (
-    patients,
-    practice_registrations,
-    clinical_events,
-    medications,
+# Smoking
+clear_smoking_codes = codelist_from_csv(
+    "codelists/opensafely-smoking-clear.csv",
+    column="CTV3Code",
+    category_column="Category",
 )
 
-from codelists import (
-    adhd_codelist, 
-    adhdrem_codelist,
-    adhd_medication_codelist,
+# Inflammatory rheumatology diagnoses
+axialspa_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-axial-spondyloarthritis.csv", column="code",
 )
 
-from datetime import (
-    datetime
+axialspa_icd = codelist_from_csv(
+    "codelists/user-markdrussell-axial-spondyloarthritis-secondary-care.csv", column="code",
 )
 
-import os
+psa_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-psoriatic-arthritis.csv", column="code",
+)
 
-def add_datestamp():
-    """Getting a time stamp link
+psa_icd = codelist_from_csv(
+    "codelists/user-markdrussell-psoriatic-arthritis-secondary-care.csv", column="code",
+)
 
-    Returns:
-        datetime_string : string of date string
-    """
-    datetime_string = datetime.today().strftime('%d_%m_%Y_%H_%M')
+rheumatoid_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-new-rheumatoid-arthritis.csv", column="code",
+)
 
-    return datetime_string
+rheumatoid_icd = codelist_from_csv(
+    "codelists/user-markdrussell-rheumatoid-arthritis-secondary-care.csv", column="code",
+)
 
-def print_file_name():
+undiffia_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-undiff-eia.csv", column="code",
+)
 
-    return os.path.basename(__file__)
+gca_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-giant-cell-arteritis.csv", column="code",
+)
 
-def first_medication_event(medications, medication_codelist, where=True):
-    """Select the first matching dmd_code from specified codelist
+gca_icd = codelist_from_csv(
+    "codelists/user-markdrussell-giant-cell-arteritis-secondary-care.csv", column="code",
+)
 
-    Args:
-        ehrql.tables.tpp.medications 
-        codelist (codelist): Clinical codelist, must be using dmd_code 
-        where (bool, optional): _description_. Defaults to True.
+sjogren_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-sjogrens-syndrome.csv", column="code",
+)
 
-    Returns:
-        patient frame: One row per patient frame, with the first matching event from medication_codelist
-    """
-    return (
-            medications.where(True)
-            .where(medications.dmd_code.is_in(medication_codelist))
-            .sort_by(medications.date)
-            .first_for_patient()
-    )
+sjogren_icd = codelist_from_csv(
+    "codelists/user-markdrussell-sjogrens-syndrome-secondary-care.csv", column="code",
+)
 
-def last_medication_event(medications, medication_codelist, where=True):
-    """Select the first matching dmd_code from specified codelist
+ssc_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-systemic-sclerosisscleroderma.csv", column="code",
+)
 
-    Args:
-        ehrql.tables.tpp.medications 
-        codelist (codelist): Clinical codelist, must be using dmd_code 
-        where (bool, optional): _description_. Defaults to True.
+ssc_icd = codelist_from_csv(
+    "codelists/user-markdrussell-systemic-sclerosis-secondary-care.csv", column="code",
+)
 
-    Returns:
-        patient frame: One row per patient frame, with the first matching event from medication_codelist
-    """
-    return (
-            medications.where(True)
-            .where(medications.dmd_code.is_in(medication_codelist))
-            .sort_by(medications.date)
-            .last_for_patient()
-    )
+sle_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-systemic-lupus-erythematosus.csv", column="code",
+)
 
+sle_icd = codelist_from_csv(
+    "codelists/user-markdrussell-systemic-lupus-erythematosus-secondary-care.csv", column="code",
+)
 
-def first_matching_event(events, codelist, where=True):
-    """Select the first matching SNOMED CT event from specified codelist
+myositis_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-inflammatory-myositis.csv", column="code",
+)
 
-    Args:
-        events (e.g., clinical_events or ): Many rows per patient event frame to select first matching event from codelist from
-        codelist (codelist): Clinical codelist, must be using snomedct codes
-        where (bool, optional): _description_. Defaults to True.
+myositis_icd = codelist_from_csv(
+    "codelists/user-markdrussell-inflammatory-myositis-secondary-care.csv", column="code",
+)
 
-    Returns:
-        patient frame: One row per patient frame, with the first matching event from codelist
-    """
-    return (
-        events.where(where)
-        .where(events.snomedct_code.is_in(codelist))
-        .sort_by(events.date)
-        .first_for_patient()
-    )
+anca_snomed = codelist_from_csv(
+    "codelists/user-markdrussell-anca-vasculitis.csv", column="code",
+)
 
-# Helper function for finding the last matching event
-def last_matching_event(events, codelist, where=True):
-    """Select the last matching SNOMED CT event from specified codelist
+anca_icd = codelist_from_csv(
+    "codelists/user-markdrussell-anca-vasculitis-secondary-care.csv", column="code",
+)
 
-    Args:
-        events (e.g., clinical_events or ): Many rows per patient event frame to select last matching event from codelist from
-        codelist (codelist): Clinical codelist, must be using snomedct codes
-        where (bool, optional): _description_. Defaults to True.
+eia_snomed = (
+    axialspa_snomed +
+    psa_snomed +
+    rheumatoid_snomed +
+    undiffia_snomed
+)
 
-    Returns:
-        patient frame: One row per patient frame, with the last matching event from codelist
-    """
-    return (
-        events.where(where)
-        .where(events.snomedct_code.is_in(codelist))
-        .sort_by(events.date)
-        .last_for_patient()
-    )
+eia_icd = (
+    axialspa_icd +
+    psa_icd +
+    rheumatoid_icd
+)
 
-def event_ADHD():
-    """Creates a ADHD diagonsis under the business rules for digonsis
+ctd_snomed = (
+    sjogren_snomed +
+    ssc_snomed +
+    sle_snomed +
+    myositis_snomed
+)
 
-    Returns:
-        patient frame: One row per patient frame, with the first matching event from codelist
-    
-    """
+ctd_icd = (
+    sjogren_icd +
+    ssc_icd +
+    sle_icd +
+    myositis_icd
+)
 
-    selected_events = clinical_events.where(
-    clinical_events.date.is_on_or_before(INTERVAL.end_date)
-    )
+vasc_snomed = (
+    anca_snomed +
+    gca_snomed
+)
 
-    has_adhd_cod_date = last_matching_event(selected_events, adhd_codelist).date
+vasc_icd = (
+    anca_icd +
+    gca_icd
+)
 
-    has_adhdrem_cod_date = last_matching_event(selected_events, adhdrem_codelist).date
+ctdvasc_snomed = (
+    sjogren_snomed +
+    ssc_snomed +
+    sle_snomed +
+    myositis_snomed +
+    anca_snomed +
+    gca_snomed
+)
 
-    # Select patients with a diagnosis of ADHD
-    has_adhd_rule_1 = has_adhd_cod_date.is_not_null()
+ctdvasc_icd = (
+    sjogren_icd +
+    ssc_icd +
+    sle_icd +
+    myositis_icd +
+    anca_icd +
+    gca_icd
+)
 
-    # Select patients with:
-    # (a) no remission code or
-    # (b) a new ADHD diagnosis after the most recent remission code
-    has_adhd_rule_2 = (has_adhdrem_cod_date.is_null()) | (
-        has_adhd_cod_date > has_adhdrem_cod_date
-    )
+all_snomed = (
+    axialspa_snomed +
+    psa_snomed +
+    rheumatoid_snomed +
+    undiffia_snomed +
+    sjogren_snomed +
+    ssc_snomed +
+    sle_snomed +
+    myositis_snomed +
+    anca_snomed +
+    gca_snomed
+)
 
-    has_adhd_rule_1_and_2 = has_adhd_rule_1 & has_adhd_rule_2
+all_icd = (
+    axialspa_icd +
+    psa_icd +
+    rheumatoid_icd +
+    sjogren_icd +
+    ssc_icd +
+    sle_icd +
+    myositis_icd +
+    anca_icd +
+    gca_icd
+)
 
-    return has_adhd_rule_1_and_2
+# Relevant comorbidities
+chd_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-chd_cod.csv", column="code",
+)
 
+diabetes_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dmtype2audit_cod.csv", column="code",
+)
 
-def first_event_ADHD(date_threshold = INTERVAL.end_date):
-    """Creates a ADHD diagonsis for the first point of diagonsis
+ild_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-interstitial-lung-disease-codes.csv",
+    column="code",
+)
 
-    Returns:
-        _type_: One row per patient frame, with the first matching event from codelist
-    """
+copd_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-copd_cod.csv", column="code",
+)
 
-    selected_events = clinical_events.where(
-    clinical_events.date.is_on_or_before(date_threshold)
-    )
+stroke_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-strk_cod.csv", column="code",
+)
 
-    has_adhdrem_cod_date = first_matching_event(selected_events, adhdrem_codelist).date
+tia_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-tia_cod.csv", column="code",
+)
 
-    return has_adhdrem_cod_date
+cva_codes = (
+    stroke_codes +
+    tia_codes
+)
+
+lung_cancer_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-lung-cancer-codes.csv", column="code",
+)
+
+haem_cancer_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-c19haemcan_cod.csv", column="code",
+)
+
+solid_cancer_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-solid-cancer-diagnosis-codes.csv", column="code",
+)
+
+ckd_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-ckdatrisk2_cod.csv", column="code",
+)
+
+creatinine_codes = codelist_from_csv(
+    "codelists/ardens-creatinine-level.csv", column="code",
+)
+
+depression_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-depr_cod.csv", column="code",
+)
+
+osteoporosis_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-osteo_cod.csv", column="code",
+)
+
+## Fragility fracture
+fracture_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-ff_cod.csv", column="code",
+)
+
+dementia_codes = codelist_from_csv(
+    "codelists/nhsd-primary-care-domain-refsets-dem_cod.csv", column="code",
+)
+
+bmi_codes = ["60621009", "846931000000101"]
+
+referral_rheummsk = codelist_from_csv(
+    "codelists/user-markdrussell-referral-rheumatology.csv", column = "code"
+)
+
+referral_rheumatology = codelist_from_csv(
+    "codelists/user-markdrussell-referral-to-rheumatology-only.csv", column = "code"
+)
+
+rf_tests = codelist_from_csv(
+    "codelists/user-markdrussell-rheumatoid-factor.csv", column = "code"
+)
+
+ccp_tests = codelist_from_csv(
+    "codelists/user-markdrussell-cyclic-citrullinated-peptide-ccp-antibody.csv", column = "code"
+)
+
+rf_codes = codelist_from_csv(
+    "codelists/user-markdrussell-rheumatoid-factor-positive-finding.csv", column = "code"
+)
+
+ccp_codes = codelist_from_csv(
+    "codelists/user-markdrussell-cyclic-citrullinated-peptide-ccp-antibody-positive-finding.csv", column = "code"
+)
+
+seropositive_codes = codelist_from_csv(
+    "codelists/user-markdrussell-seropositive-rheumatoid-arthritis.csv", column = "code"
+)
+
+erosive_codes = codelist_from_csv(
+    "codelists/user-markdrussell-erosive-rheumatoid-arthritis.csv", column = "code"
+)
+
+# MEDICATIONS
+hydroxychloroquine_codes = codelist_from_csv(
+    "codelists/opensafely-hydroxychloroquine.csv", column="code"
+)  
+leflunomide_codes = codelist_from_csv(  
+    "codelists/opensafely-leflunomide-dmd.csv", column="code"
+)    
+methotrexate_codes = codelist_from_csv(                   
+    "codelists/opensafely-methotrexate-oral.csv", column="code"
+)                   
+methotrexate_inj_codes = codelist_from_csv(                         
+    "codelists/opensafely-methotrexate-injectable.csv", column="code"
+)                   
+sulfasalazine_codes = codelist_from_csv(       
+    "codelists/opensafely-sulfasalazine-oral-dmd.csv", column="code"
+)
+steroid_codes = codelist_from_csv(       
+    "codelists/user-markdrussell-corticosteroids-oral-im-or-iv-dmd.csv", column="code"
+)

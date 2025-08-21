@@ -1,185 +1,79 @@
-################################################################################
-#
-# Description: This script contains custom functions for:
-#             - 
-#             - Extracting comorbidities from primary care data based on codelist
-#             - Extracting emergency care data based on codelist
-#             - Extracting patients with COVID-19 admissions depending on method specified
-#             - Matching hospital admission dignosis with codelist
-#             - Creating n sequential admission date variables
-#             - Extracting practice deregistration date
-#             - 
-#             - 
-#             - 
-#             - 
-#
-# Author(s): M Green, W Hulme, S Maude
-# Date last updated: 04/08/2023
-#
-################################################################################
+from argparse import ArgumentParser
 
+from ehrql import create_dataset, codelist_from_csv, days, show
+from ehrql.tables.core import patients, practice_registrations, clinical_events, medications
 
+parser = ArgumentParser()
+parser.add_argument("--year", default="2025")
+args = parser.parse_args()
+year = args.year
+index_date = f"{year}-01-01"
 
-# IMPORT STATEMENTS ------------------------
+diabetes_codes = codelist_from_csv("codelists/nhsd-primary-care-domain-refsets-dm_cod.csv", column="code")
+resolved_codes = codelist_from_csv("codelists/nhsd-primary-care-domain-refsets-dmres_cod.csv", column="code")
+proteinuria_codes = codelist_from_csv("codelists/nhsd-primary-care-domain-refsets-prt_cod.csv", column="code")
+microalbuminuria_codes = codelist_from_csv("codelists/nhsd-primary-care-domain-refsets-mal_cod.csv", column="code")
+ace_codes = codelist_from_csv("codelists/opensafely-ace-inhibitor-medications.csv", column="code")
+arb_codes = codelist_from_csv("codelists/opensafely-angiotensin-ii-receptor-blockers-arbs.csv", column="code")
 
-# Import tables and Python objects
-from ehrql import Dataset, days, years, case, when
-from ehrql.codes import ICD10Code
-from ehrql.tables.beta.tpp import (
-  hospital_admissions, 
-  emergency_care_attendances, 
-  practice_registrations, 
-  patients, 
-  sgss_covid_all_tests, 
-  vaccinations,
-  addresses, 
-  clinical_events
-  )
-import operator
-from functools import reduce
+previous_events = clinical_events.where(clinical_events.date.is_on_or_before(index_date))
+recent_meds = medications.where(medications.date.is_on_or_between(index_date - days(180), index_date))
 
-# Import codelists
-import codelists_ehrql
+aged_17_or_older = (index_date - patients.date_of_birth).years >= 17
+was_alive = patients.date_of_death.is_null() | (patients.date_of_death < index_date)
+was_registered = (
+    practice_registrations.where(practice_registrations.start_date <= index_date)
+    .except_where(practice_registrations.end_date < index_date)
+    .exists_for_patient()
+)
 
+last_diagnosis_date = (
+    previous_events
+    .where(clinical_events.snomedct_code.is_in(diabetes_codes))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
+)
+last_resolved_date = (
+    previous_events
+    .where(clinical_events.snomedct_code.is_in(resolved_codes))
+    .sort_by(clinical_events.date)
+    .last_for_patient()
+    .date
+)
 
+has_unresolved_diabetes = last_diagnosis_date.is_not_null() & (
+    last_resolved_date.is_null() | (last_resolved_date < last_diagnosis_date)
+)
 
+on_register = aged_17_or_older & was_alive & was_registered & has_unresolved_diabetes
 
+has_proteinuria_diagnosis = (
+    previous_events
+    .where(clinical_events.snomedct_code.is_in(proteinuria_codes))
+    .exists_for_patient()
+)
 
-# FUNCTIONS ------------------------
+has_microalbuminuria_diagnosis = (
+    previous_events
+    .where(clinical_events.snomedct_code.is_in(microalbuminuria_codes))
+    .exists_for_patient()
+)
 
-# Extract comorbidity from primary care data based on codelist ------------------------
-def has_prior_comorbidity(
-  extract_name, codelist_name, system, column_name, dataset):
-    
-    codelist_attribute = getattr(codelists_ehrql, codelist_name)
-    if system == "snomed":
-      characteristic = (
-          clinical_events.where(clinical_events.snomedct_code.is_in(codelist_attribute))
-          .where(clinical_events.date.is_on_or_before(getattr(dataset, column_name) - days(1)))
-          .exists_for_patient()
-      )
-      setattr(dataset, extract_name, characteristic)
-    
-    if system == "ctv3":
-      characteristic = (
-          clinical_events.where(clinical_events.ctv3_code.is_in(codelist_attribute))
-          .where(clinical_events.date.is_on_or_before(getattr(dataset, column_name) - days(1)))
-          .exists_for_patient()
-      )
-      setattr(dataset, extract_name, characteristic)
+has_arb_treatment = (
+    recent_meds
+    .where(medications.dmd_code.is_in(arb_codes))
+    .exists_for_patient()
+)
 
+has_ace_treatment = (
+    recent_meds
+    .where(medications.dmd_code.is_in(ace_codes))
+    .exists_for_patient()
+)
 
+dataset = create_dataset()
+dataset.define_population(on_register)
 
-# Extract emergency care data based on codelist ------------------------
-def emergency_care_diagnosis_matches(emergency_care_attendances, codelist):
-  conditions = [
-    getattr(emergency_care_attendances, column_name).is_in(codelist)
-    for column_name in [f"diagnosis_{i:02d}" for i in range(1, 25)]
-  ]
-  return emergency_care_attendances.where(reduce(operator.or_, conditions)) 
-
-
-
-# Match hospital admission dignosis with codelists ------------------------
-def hospitalisation_diagnosis_matches(admissions, codelist):
-    code_strings = set()
-    for code in codelist:
-        # Pass the string through the ICD10Code to constructor to validate that it has
-        # the expected format
-        code_string = ICD10Code(code)._to_primitive_type()
-        code_strings.add(code_string)
-    conditions = [
-        # The reason a plain substring search like this works is twofold:
-        #
-        # * ICD-10 codes all start with the sequence [A-Z][0-9] and do not contain
-        #   such a sequence in any other part of the code. In this sense they are
-        #   suffix-free and two codes will only match at they start if they match at
-        #   all.
-        #
-        # * Although the codes are not prefix-free they are organised hierarchically
-        #   such that code A0123 represents a child concept of code A01. So although
-        #   the naive substring matching below will find code A01 if code A0123 is
-        #   present, this happens to be the behaviour we actually want.
-        #
-        # Obviously this is all far from ideal though, and later we hope to be able
-        # to pull these codes out in a separate table and handle the matching
-        # properly.
-        admissions.all_diagnoses.contains(code_string)
-        for code_string in code_strings
-    ]
-    return admissions.where(reduce(operator.or_, conditions))
-
-
-
-# Extract patients with COVID-19 admissions depending on method specified ------------------------
-def admissions_data(admission_method, hospital_admissions, emergency_care_attendances):
-    
-    # Unplanned admissions with a ICD10 COVID code as a diagnosis
-    if admission_method == "A":
-      admissions_data_sus = (
-          hospitalisation_diagnosis_matches(hospital_admissions, codelists_ehrql.covid_icd10)
-          .where(hospital_admissions.admission_method.is_in(["21", "22", "23", "24", "25", "2A", "2B", "2C", "2D", "28"]))
-          #.where(hospital_admissions.admission_date.is_on_or_after(start_date))
-          .sort_by(hospital_admissions.admission_date)
-      )
-    
-    ## Any hospital admission with a ICD10 COVID code as a diagnosis
-    if admission_method == "B":
-      admissions_data_sus = (
-          hospitalisation_diagnosis_matches(hospital_admissions, codelists_ehrql.covid_icd10)
-          #.where(hospital_admissions.admission_date.is_on_or_after(start_date))
-          .sort_by(hospital_admissions.admission_date)
-      )
-    
-    ## A&E attendance resulting in admission to hospital, with a COVID code 
-    ## (from the A&E SNOMED discharge diagnosis refset) as the A&E discharge diagnosis
-    ## Note, this is expected to be a big underestimate of actual COVID admissions, but A&E data arrives 
-    ## much quick than hospital data for rapid real time analyses it can be an important proxy 
-    if admission_method == "C":
-      admissions_data_sus = (
-          emergency_care_diagnosis_matches(emergency_care_attendances, codelists_ehrql.covid_emergency)
-          #.where(emergency_care_attendances.arrival_date.is_on_or_after(start_date))
-          .where(emergency_care_attendances.discharge_destination.is_in(codelists_ehrql.discharged_to_hospital))
-          .sort_by(emergency_care_attendances.arrival_date)
-      )
-      
-    return admissions_data_sus
-
-
-
-# Create n sequential admission date variables ------------------------
-
-def get_sequential_admissions_date(
-    dataset, variable_name_template, admissions_data, num_admissions, admission_method, sort_column=None):    
-    
-    if admission_method == "C":
-      column = "arrival_date"
-    else:
-      column = "admission_date"
-    
-    sort_column = sort_column or column
-    
-    previous_date = None
-    
-    for index in range(num_admissions):
-        next_admission = admissions_data.sort_by(getattr(admissions_data, sort_column)).first_for_patient()
-        admissions_data = admissions_data.where(
-            getattr(admissions_data, sort_column) > getattr(next_admission, sort_column)
-        )
-        variable_name = variable_name_template.format(n=index + 1)
-        setattr(dataset, variable_name, getattr(next_admission, column))
-    
-
-
-# Extract practice deregistration date ------------------------
-
-def date_deregistered_from_all_supported_practices(practice_registrations, case, when):
-    max_dereg_date = practice_registrations.end_date.maximum_for_patient()
-    # In TPP currently active registrations are recorded as having an end date of
-    # 9999-12-31. We convert these, and any other far-future dates, to NULL.
-    return case(
-        when(max_dereg_date.is_before("3000-01-01")).then(max_dereg_date),
-        default=None,
-    )
-
-
+dataset.prt_or_mal = has_proteinuria_diagnosis | has_microalbuminuria_diagnosis
+dataset.ace_or_arb = has_arb_treatment | has_ace_treatment

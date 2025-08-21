@@ -1,256 +1,110 @@
-from databuilder.ehrql import codelist_from_csv
+from ehrql import case, when, years, days, minimum_of, maximum_of
+from ehrql.tables.core import patients
+from ehrql.tables.tpp import ( 
+    addresses,
+    clinical_events,
+    practice_registrations)
 
-# 1. Long COVID
-# # import different long COVID codelists:
-long_covid_assessment_codes = codelist_from_csv(
-    "codelists/opensafely-assessment-instruments-and-outcome-measures-for-long-covid.csv",
-    column="code"
-)     
-    
-long_covid_dx_codes = codelist_from_csv(
-    "codelists/opensafely-nice-managing-the-long-term-effects-of-covid-19.csv",
-    column="code"
-) 
+import codelists
 
-long_covid_referral_codes = codelist_from_csv(
-    "codelists/opensafely-referral-and-signposting-for-long-covid.csv",
-    column="code"
-) 
+from dataset_definition import make_dataset_lowerGI
 
-# # Combine long covid codelists
-lc_codelists_combined = (
-    long_covid_dx_codes
-    + long_covid_referral_codes
-    + long_covid_assessment_codes
+index_date = "2018-03-23"
+end_date = "2023-10-22"
+
+dataset = make_dataset_lowerGI(index_date="2018-03-23", end_date="2023-10-22")
+
+elig_cohort = dataset.entry_date.is_on_or_before(end_date) & dataset.exit_date.is_after(index_date) & patients.date_of_birth.is_not_null()
+
+dataset.define_population(
+    elig_cohort
 )
 
-# 2. Ethnicities: 
+dataset.period_entry = maximum_of(index_date, dataset.entry_date)
+dataset.period_exit = minimum_of(end_date, dataset.exit_date)
 
-ethnicity = codelist_from_csv(
-    "codelists/opensafely-ethnicity.csv",
-    column="Code",
-    category_column="Grouping_6",
-)
+dataset.follow_up_years = (dataset.period_exit - dataset.period_entry).years
 
-# 3. Mental issues:
-psychosis_schizophrenia_bipolar_codes = codelist_from_csv(
-    "codelists/opensafely-psychosis-schizophrenia-bipolar-affective-disease.csv",
-    column="CTV3Code",
-)
-depression_codes = codelist_from_csv(
-    "codelists/opensafely-depression.csv", column="CTV3Code"
-)
+dataset.colorectal_ca_diag = clinical_events.where(clinical_events.snomedct_code.is_in(codelists.colorectal_diagnosis_codes_snomed)
+        ).where(
+            clinical_events.date.is_on_or_between(index_date, end_date)
+        ).exists_for_patient()
 
-mental_health_all = (
-    psychosis_schizophrenia_bipolar_codes
-    + depression_codes
-)
+dataset.colorectal_ca_diag_date = clinical_events.where(clinical_events.snomedct_code.is_in(codelists.colorectal_diagnosis_codes_snomed)
+        ).where(
+            clinical_events.date.is_on_or_between(index_date, end_date)
+        ).sort_by(
+            clinical_events.date
+        ).first_for_patient().date
 
-# 3. COVID hospitalisation
-hosp_covid = codelist_from_csv(
-  "codelists/opensafely-covid-identification.csv",
-  column="icd10_code"
-)
-
-# 4. Cancer codelist
-lung_cancer = codelist_from_csv(
-    "codelists/opensafely-lung-cancer.csv",
-    column="CTV3ID",
+age = patients.age_on(dataset.entry_date)
+dataset.age = age
+dataset.age_group = case(
+        when(age < 30).then("16-29"),
+        when(age < 40).then("30-39"),
+        when(age < 50).then("40-49"),
+        when(age < 60).then("50-59"),
+        when(age < 70).then("60-69"),
+        when(age < 80).then("70-79"),
+        when(age < 90).then("80-89"),
+        when(age >= 90).then("90+"),
+        otherwise="missing",
 )
 
-other_cancer = codelist_from_csv(
-    "codelists/opensafely-cancer-excluding-lung-and-haematological.csv",
-    column="CTV3ID",    
+dataset.sex = patients.sex
+
+imd = addresses.for_patient_on(dataset.entry_date).imd_rounded
+dataset.imd5 = case(
+        when((imd >=0) & (imd < int(32844 * 1 / 5))).then("1"),
+        when(imd < int(32844 * 2 / 5)).then("2"),
+        when(imd < int(32844 * 3 / 5)).then("3"),
+        when(imd < int(32844 * 4 / 5)).then("4"),
+        when(imd < int(32844 * 5 / 5)).then("5"),
+        otherwise="unknown"
 )
 
-haema_cancer = codelist_from_csv(
-    "codelists/opensafely-haematological-cancer.csv",
-    column="CTV3ID",        
-)
-cancer_all_combined__codelist = (
-    lung_cancer 
-    + other_cancer
-    + haema_cancer
+ethnicity6 = clinical_events.where(
+        clinical_events.snomedct_code.is_in(codelists.ethnicity_codes_6)
+    ).where(
+        clinical_events.date.is_on_or_before(dataset.entry_date)
+    ).sort_by(
+        clinical_events.date
+    ).last_for_patient().snomedct_code.to_category(codelists.ethnicity_codes_6)
+
+dataset.ethnicity6 = case(
+    when(ethnicity6 == "1").then("White"),
+    when(ethnicity6 == "2").then("Mixed"),
+    when(ethnicity6 == "3").then("South Asian"),
+    when(ethnicity6 == "4").then("Black"),
+    when(ethnicity6 == "5").then("Other"),
+    when(ethnicity6 == "6").then("Not stated"),
+    otherwise="Unknown"
 )
 
-asthma = codelist_from_csv(
-    "codelists/opensafely-asthma-diagnosis.csv",
-    column="CTV3ID",
-)
+dataset.region = practice_registrations.for_patient_on(dataset.entry_date).practice_nuts1_region_name
 
-copd = codelist_from_csv(
-    "codelists/opensafely-chronic-respiratory-disease.csv",
-    column="CTV3ID",
-)
+def num_event(codelist, l_age, u_age):
+    return clinical_events.where(clinical_events.snomedct_code.is_in(codelist)
+        ).where(
+            clinical_events.date.is_on_or_between(index_date, end_date)
+        ).where(
+            clinical_events.date.is_on_or_between(dataset.entry_date, dataset.exit_date)
+        ).where(
+            patients.age_on(clinical_events.date)>=l_age
+        ).where(
+            patients.age_on(clinical_events.date)<u_age
+        ).date.count_episodes_for_patient(days(42))
 
-organ_transplant_code = codelist_from_csv(
-    "codelists/opensafely-solid-organ-transplantation.csv",
-    column="CTV3ID",
-)
+dataset.num_ida = num_event(codelists.ida_codes, 16, 111)
+dataset.num_cibh = num_event(codelists.cibh_codes, 16, 111)
+dataset.num_prbleed = num_event(codelists.prbleeding_codes, 16, 111)
+dataset.num_wl = num_event(codelists.wl_codes, 16, 111)
+dataset.num_abdomass = num_event(codelists.abdomass_codes, 16, 111)
+dataset.num_abdopain = num_event(codelists.abdopain_codes, 16, 111)
+dataset.num_anaemia = num_event(codelists.anaemia_codes, 16, 111)
+dataset.num_prbleed_50 = num_event(codelists.prbleeding_codes, 50, 111)
+dataset.num_wl_50 = num_event(codelists.wl_codes, 50, 111)
+dataset.num_abdopain_50 = num_event(codelists.abdopain_codes, 50, 111)
+dataset.num_anaemia_60 = num_event(codelists.anaemia_codes, 60, 111)
 
-chronic_cardiac_diseases_code = codelist_from_csv(
-    "codelists/opensafely-chronic-cardiac-disease.csv",
-    column="CTV3ID",    
-)
-
-chronic_liver_disease_code = codelist_from_csv(
-    "codelists/opensafely-chronic-liver-disease.csv",
-    column="CTV3ID",        
-)
-
-stroke_code = codelist_from_csv(
-    "codelists/opensafely-stroke-updated.csv",
-    column="CTV3ID",
-)
-
-dementia_code = codelist_from_csv(
-    "codelists/opensafely-dementia.csv",
-    column="CTV3ID",
-)
-
-other_neuro_code = codelist_from_csv(
-    "codelists/opensafely-other-neurological-conditions.csv",
-    column="CTV3ID",
-)
-
-ra_sle_psoriasis_code = codelist_from_csv(
-    "codelists/opensafely-ra-sle-psoriasis.csv",
-    column="CTV3ID",
-)
-
-asplenia_code = codelist_from_csv(
-    "codelists/opensafely-asplenia.csv",
-    column="CTV3ID",
-)
-
-hiv_code = codelist_from_csv(
-    "codelists/opensafely-hiv.csv",
-    column="CTV3ID",
-)
-
-aplastic_anemia_code = codelist_from_csv(
-    "codelists/opensafely-aplastic-anaemia.csv",
-    column="CTV3ID",
-)
-
-permanent_immune_suppress_code = codelist_from_csv(
-    "codelists/opensafely-permanent-immunosuppression.csv",
-    column="CTV3ID",
-)
-
-temporary_immune_suppress_code = codelist_from_csv(
-    "codelists/opensafely-temporary-immunosuppression.csv",
-    column="CTV3ID",
-)
-
-# adminstered vaccine codes
-vac_adm_1 = codelist_from_csv(
-    "codelists/primis-covid19-vacc-uptake-covadm1.csv",
-    column="code"
-)
-vac_adm_2 = codelist_from_csv(
-    "codelists/primis-covid19-vacc-uptake-covadm2.csv",
-    column="code"
-)
-vac_adm_3 = codelist_from_csv(
-    "codelists/primis-covid19-vacc-uptake-covadm3_cod.csv",
-    column="code"
-)
-vac_adm_4 = codelist_from_csv(
-    "codelists/primis-covid19-vacc-uptake-covadm4_cod.csv",
-    column="code"
-)
-vac_adm_5 = codelist_from_csv(
-    "codelists/primis-covid19-vacc-uptake-covadm5_cod.csv",
-    column="code"
-)
-
-vac_adm_combine_code = (
-    vac_adm_1
-    + vac_adm_2
-    + vac_adm_3
-    + vac_adm_4
-    + vac_adm_5
-)
-
-
-drug_bnf_ch1_gi_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-1-gastro-intestinal-system-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch2_cv_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-2-cardiovascular-system-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch3_chest_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-3-respiratory-system-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch4_cns_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-4-central-nervous-system-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch5_inf_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-5-infections-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch6_meta_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-6-endocrine-system-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch7_gyn = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-7-obstetrics-gynaecology-and-urinary-tract-disorders-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch8_cancer_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-8-malignant-disease-and-immunosuppression-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch9_diet_blood_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-9-nutrition-and-blood-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch10_muscle_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-10-musculoskeletal-and-joint-diseases-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch11_eye_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-11-eye-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch12_ent_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-12-ear-nose-and-oropharynx-dmd.csv",
-    column="code"
-)
-
-drug_bnf_ch13_skin_dmd = codelist_from_csv(
-    "codelists/user-kate-mansfield-bnf-13-skin-dmd.csv",
-    column="code"
-)
-
-total_drugs_dmd = (
-    drug_bnf_ch1_gi_dmd
-    + drug_bnf_ch2_cv_dmd
-    + drug_bnf_ch3_chest_dmd
-    + drug_bnf_ch4_cns_dmd
-    + drug_bnf_ch5_inf_dmd
-    + drug_bnf_ch6_meta_dmd
-    + drug_bnf_ch7_gyn
-    + drug_bnf_ch8_cancer_dmd
-    + drug_bnf_ch9_diet_blood_dmd
-    + drug_bnf_ch10_muscle_dmd
-    + drug_bnf_ch11_eye_dmd
-    + drug_bnf_ch12_ent_dmd
-    + drug_bnf_ch13_skin_dmd
-)
+dataset.num_lowerGI_any_symp = num_event(codelists.colorectal_symptom_codes, 16, 111)

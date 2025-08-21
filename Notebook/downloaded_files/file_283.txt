@@ -1,194 +1,117 @@
-from ehrql import Dataset, years, days, months, minimum_of, maximum_of, case, when
-from ehrql.tables.core import patients, clinical_events
-from ehrql.tables.tpp import practice_registrations, ons_deaths, opa, opa_proc, apcs
+from ehrql import case, when, years, days, minimum_of, maximum_of
+from ehrql.tables.core import patients
+from ehrql.tables.tpp import ( 
+    addresses,
+    clinical_events,
+    clinical_events_ranges,
+    practice_registrations)
 
 import codelists
 
-index_date = "2020-01-21"
+from dataset_definition_fit import make_dataset_fit
+
+index_date = "2018-03-23"
 end_date = "2023-10-22"
 
-dataset = Dataset()
+dataset = make_dataset_fit(index_date="2018-03-23", end_date="2023-10-22")
 
-lowerGI_2ww_ref = clinical_events.where(clinical_events.snomedct_code.is_in(codelists.colorectal_referral_codes)
-            ).where(
-                clinical_events.date.is_on_or_between(index_date, end_date)
-            ).sort_by(
-                clinical_events.date
-            ).first_for_patient()
-
-has_lowerGI_2ww = lowerGI_2ww_ref.exists_for_patient()
-
-region = practice_registrations.for_patient_on(index_date).practice_nuts1_region_name 
-region_east = case(
-        when(region == "East").then(True),
-        otherwise=False
-)
+elig_cohort = dataset.entry_date.is_on_or_before(end_date) & dataset.exit_date.is_after(index_date) & patients.date_of_birth.is_not_null()
 
 dataset.define_population(
-    has_lowerGI_2ww & region_east
+    elig_cohort
 )
 
-dataset.lowerGI_2ww_date = lowerGI_2ww_ref.date
+dataset.period_entry = maximum_of(index_date, dataset.entry_date)
+dataset.period_exit = minimum_of(end_date, dataset.exit_date)
 
-first_attendance_code = ["1", "3"]
-colorectal_surg_clinic_code = ["104"]
-gastro_clinic_code = ["301"]
-gen_surg_clinic_code = ["100"]
-#opcs_colonoscopy_code = ["H22", "H18", "H25", "H28"]
+dataset.follow_up_years = (dataset.period_exit - dataset.period_entry).years
 
-"""
-colorectal_surg_clinic_21days = (
-    opa.where(opa.treatment_function_code.is_in(colorectal_surg_clinic_code)
+dataset.colorectal_ca_diag = clinical_events.where(clinical_events.snomedct_code.is_in(codelists.colorectal_diagnosis_codes_snomed)
         ).where(
-            opa.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(21))          
+            clinical_events.date.is_on_or_between(index_date, end_date)
+        ).exists_for_patient()
+
+dataset.colorectal_ca_diag_date = clinical_events.where(clinical_events.snomedct_code.is_in(codelists.colorectal_diagnosis_codes_snomed)
         ).where(
-            opa.first_attendance.is_in(first_attendance_code)
-        ).sort_by(
-            opa.appointment_date
-        ).first_for_patient()
-)
-"""
-
-colorectal_surg_clinic_6weeks = (
-    opa.where(opa.treatment_function_code.is_in(colorectal_surg_clinic_code)
-        ).where(
-            opa.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(42))          
-        ).where(
-            opa.first_attendance.is_in(first_attendance_code)
-        ).sort_by(
-            opa.appointment_date
-        ).first_for_patient()
-)
-
-#dataset.colorectal_surg_clinic_21d = colorectal_surg_clinic_21days.exists_for_patient()
-dataset.colorectal_surg_clinic_6w = colorectal_surg_clinic_6weeks.exists_for_patient()
-
-"""
-gastro_clinic_21days = (
-    opa.where(opa.treatment_function_code.is_in(gastro_clinic_code)
-        ).where(
-            opa.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(21))          
-        ).where(
-            opa.first_attendance.is_in(first_attendance_code)
-        ).sort_by(
-            opa.appointment_date
-        ).first_for_patient()
-)
-"""
-
-gastro_clinic_6weeks = (
-    opa.where(opa.treatment_function_code.is_in(gastro_clinic_code)
-        ).where(
-            opa.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(42))          
-        ).where(
-            opa.first_attendance.is_in(first_attendance_code)
-        ).sort_by(
-            opa.appointment_date
-        ).first_for_patient()
-)
-
-#dataset.gastro_clinic_21d = gastro_clinic_21days.exists_for_patient()
-dataset.gastro_clinic_6w = gastro_clinic_6weeks.exists_for_patient()
-
-gen_surg_clinic_6weeks = (
-    opa.where(opa.treatment_function_code.is_in(gen_surg_clinic_code)
-        ).where(
-            opa.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(42))          
-        ).where(
-            opa.first_attendance.is_in(first_attendance_code)
-        ).sort_by(
-            opa.appointment_date
-        ).first_for_patient()
-)
-
-dataset.gen_surg_clinic_6w = gen_surg_clinic_6weeks.exists_for_patient()
-
-"""
-colonoscopy_21days = (
-    opa_proc.where(opa_proc.primary_procedure_code.is_in(colonoscopy_code)
-        ).where(
-            opa_proc.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(21))
-        ).sort_by(
-            opa_proc.appointment_date
-        ).first_for_patient()
-)
-
-opa_colonoscopy_6weeks = (
-    opa_proc.where(opa_proc.primary_procedure_code.is_in(opcs_colonoscopy_code)
-        ).where(
-            opa_proc.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(42))
-        ).sort_by(
-            opa_proc.appointment_date
-        ).first_for_patient()
-)
-
-dataset.colonoscopy_21d = colonoscopy_21days.exists_for_patient()
-dataset.opa_colonoscopy_6w = opa_colonoscopy_6weeks.exists_for_patient()
-"""
-apcs_diagnostic_6weeks = (
-    apcs.where(apcs.spell_core_hrg_sus.is_in(codelists.lowerGI_diagnostic_codes)
-        ).where(
-            apcs.admission_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(42))
-        ).sort_by(
-            apcs.admission_date
-        ).first_for_patient()
-)
-
-dataset.apcs_diagnostic_6w = apcs_diagnostic_6weeks.exists_for_patient()
-
-opa_diagnostic_6weeks = (
-    opa.where(opa.hrg_code.is_in(codelists.lowerGI_diagnostic_codes)
-        ).where(
-            opa.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(42))
-        ).sort_by(
-            opa.appointment_date
-        ).first_for_patient()
-)
-
-dataset.opa_diagnostic_6w = opa_diagnostic_6weeks.exists_for_patient()
-
-dataset.lowergi_diagnostic_6w = (dataset.apcs_diagnostic_6w | dataset.opa_diagnostic_6w)
-
-dataset.lowergi_referral_6w = (dataset.lowergi_diagnostic_6w | dataset.colorectal_surg_clinic_6w | dataset.gastro_clinic_6w | dataset.gen_surg_clinic_6w)
-
-
-opa_1month = (
-    opa.where(opa.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + months(1))
-        ).where(
-            opa.first_attendance.is_in(first_attendance_code)
-        ).sort_by(
-            opa.appointment_date
-        ).first_for_patient()
-)
-
-dataset.opa_1m_tfc = opa_1month.treatment_function_code
-
-"""
-proc_1month = (
-    opa_proc.where(opa_proc.appointment_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + months(1))
-        ).sort_by(
-            opa_proc.appointment_date
-        ).first_for_patient()
-)
-
-dataset.proc_1m_opcs = proc_1month.primary_procedure_code
-"""
-
-apcs_6weeks = (
-    apcs.where(apcs.admission_date.is_on_or_between(dataset.lowerGI_2ww_date, dataset.lowerGI_2ww_date + days(42))
-        ).sort_by(
-            apcs.admission_date
-        ).first_for_patient()
-)
-
-dataset.apcs_6w_icd10 = apcs_6weeks.primary_diagnosis
-dataset.apcs_6w_hrg = apcs_6weeks.spell_core_hrg_sus
-
-gp_events_1month = (
-    clinical_events.where(clinical_events.date.is_on_or_between(dataset.lowerGI_2ww_date + days(1), dataset.lowerGI_2ww_date + months(1))
+            clinical_events.date.is_on_or_between(index_date, end_date)
         ).sort_by(
             clinical_events.date
-        ).first_for_patient()
+        ).first_for_patient().date
+
+age = patients.age_on(dataset.entry_date)
+dataset.age = age
+dataset.age_group = case(
+        when(age < 30).then("16-29"),
+        when(age < 40).then("30-39"),
+        when(age < 50).then("40-49"),
+        when(age < 60).then("50-59"),
+        when(age < 70).then("60-69"),
+        when(age < 80).then("70-79"),
+        when(age < 90).then("80-89"),
+        when(age >= 90).then("90+"),
+        otherwise="missing",
 )
 
-dataset.gp_events_snomed = gp_events_1month.snomedct_code
+dataset.sex = patients.sex
+
+imd = addresses.for_patient_on(dataset.entry_date).imd_rounded
+dataset.imd5 = case(
+        when((imd >=0) & (imd < int(32844 * 1 / 5))).then("1"),
+        when(imd < int(32844 * 2 / 5)).then("2"),
+        when(imd < int(32844 * 3 / 5)).then("3"),
+        when(imd < int(32844 * 4 / 5)).then("4"),
+        when(imd < int(32844 * 5 / 5)).then("5"),
+        otherwise="unknown"
+)
+
+ethnicity6 = clinical_events.where(
+        clinical_events.snomedct_code.is_in(codelists.ethnicity_codes_6)
+    ).where(
+        clinical_events.date.is_on_or_before(dataset.entry_date)
+    ).sort_by(
+        clinical_events.date
+    ).last_for_patient().snomedct_code.to_category(codelists.ethnicity_codes_6)
+
+dataset.ethnicity6 = case(
+    when(ethnicity6 == "1").then("White"),
+    when(ethnicity6 == "2").then("Mixed"),
+    when(ethnicity6 == "3").then("South Asian"),
+    when(ethnicity6 == "4").then("Black"),
+    when(ethnicity6 == "5").then("Other"),
+    when(ethnicity6 == "6").then("Not stated"),
+    otherwise="Unknown"
+)
+
+dataset.region = practice_registrations.for_patient_on(dataset.entry_date).practice_nuts1_region_name
+
+dataset.num_fit = clinical_events.where(clinical_events.snomedct_code.is_in(codelists.fit_codes)
+        ).where(
+            clinical_events.date.is_on_or_between(index_date, end_date)
+        ).where(
+            clinical_events.date.is_on_or_between(dataset.entry_date, dataset.exit_date)
+        ).date.count_episodes_for_patient(days(42))
+
+fit_positive_1 = clinical_events_ranges.where(clinical_events_ranges.snomedct_code.is_in(codelists.fit_codes)
+        ).where(
+            clinical_events_ranges.date.is_on_or_between(index_date, end_date)
+        ).where(
+            clinical_events_ranges.numeric_value>=10
+        ).where(
+            clinical_events_ranges.comparator!="<"
+        ).exists_for_patient()
+
+fit_postive_2 = clinical_events_ranges.where(clinical_events_ranges.snomedct_code.is_in(codelists.fit_codes)
+        ).where(
+            clinical_events_ranges.date.is_on_or_between(index_date, end_date)
+        ).where(
+            clinical_events_ranges.snomedct_code=="389076003"
+        ).exists_for_patient()
+
+fit_positive_3 = clinical_events_ranges.where(clinical_events_ranges.snomedct_code.is_in(codelists.fit_codes)
+        ).where(
+            clinical_events_ranges.date.is_on_or_between(index_date, end_date)
+        ).where(
+            clinical_events_ranges.snomedct_code=="59614000"
+        ).exists_for_patient()
+
+dataset.fit_test_positive = (fit_positive_1 | fit_postive_2 | fit_positive_3)

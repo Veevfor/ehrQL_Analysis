@@ -1,53 +1,125 @@
+####################################################################
+# This script fetches all of the codelists identified in 
+# codelists.txt from OpenCodelists.
+#
+# Author: Andrea Schaffer 
+#   Bennett Institute for Applied Data Science
+#   University of Oxford, 2024
+#####################################################################
+
+
+# --- IMPORT STATEMENTS ---
+
+## Import code building blocks from cohort extractor package
 from ehrql import codelist_from_csv
-from ehrql import create_dataset
-from ehrql.tables.tpp import (
-    clinical_events, 
-    patients,
-    practice_registrations,
+
+ 
+# --- CODELISTS ---
+
+## Care home - use primis based on Schultze et al report (10.12688/wellcomeopenres.16737.1)
+carehome_primis_codes = codelist_from_csv(
+  "codelists/primis-covid19-vacc-uptake-longres.csv", 
+  column = "code",
 )
 
-# Hypertension codes
-hyp_cod = codelist_from_csv(
-    "codelists/nhsd-primary-care-domain-refsets-hyp_cod.csv",
-    column="code"
-)
-# Hypertension resolved codes
-hypres_cod = codelist_from_csv(
-    "codelists/nhsd-primary-care-domain-refsets-hypres_cod.csv",
-    column="code"
+## Cancer 
+
+###  Cancer - excluding lung/haem
+oth_ca_codes = codelist_from_csv(
+  "codelists/opensafely-cancer-excluding-lung-and-haematological-snomed.csv",
+  column = "id"
 )
 
-index_date = "2024-03-31"
-dataset = create_dataset()
-
-### variables ###
-
-# date of the most recent hypertension diagnosis up to and including the achievement date
-dataset.hyplat_dat = (
-    clinical_events.where(clinical_events.snomedct_code.is_in(hyp_cod) & clinical_events.date.is_on_or_before(index_date))
-    .sort_by(clinical_events.date)
-    .last_for_patient()
-    .date
+### Cancer - lung
+lung_ca_codes = codelist_from_csv(
+  "codelists/opensafely-lung-cancer-snomed.csv",
+  column = "id"
 )
 
-# date of the most recent hypertension diagnosis resolved code recorded after the most recent hypertension diagnosis and up to and including the achievement date
-dataset.hypres_dat = (
-    clinical_events.where(clinical_events.snomedct_code.is_in(hypres_cod) & clinical_events.date.is_on_or_before(index_date))
-    .sort_by(clinical_events.date)
-    .last_for_patient()
-    .date
+### Cancer - haematological
+haem_ca_codes = codelist_from_csv(
+  "codelists/opensafely-haematological-cancer-snomed.csv",
+  column = "id"
+)
+
+### All cancer combined
+cancer_codes = (
+  oth_ca_codes +
+  lung_ca_codes +
+  haem_ca_codes
+)
+
+## Medication DM&D
+### High dose, long-acting opioids 
+hi_opioid_codes = codelist_from_csv(
+  "codelists/opensafely-high-dose-long-acting-opioids-openprescribing-dmd.csv",
+  column = "code",
+)
+
+### Buccal opioids
+buc_opioid_codes = codelist_from_csv(
+  "codelists/opensafely-opioid-containing-medicines-buccal-nasal-and-oromucosal-excluding-drugs-for-substance-misuse-dmd.csv",
+  column = "code",
+)
+
+### Inhaled opioids
+inh_opioid_codes = codelist_from_csv(
+  "codelists/opensafely-opioid-containing-medicines-inhalation-excluding-drugs-for-substance-misuse-dmd.csv",
+  column = "code",
+)
+
+### Oral opioids
+oral_opioid_codes = codelist_from_csv(
+  "codelists/opensafely-opioid-containing-medicines-oral-excluding-drugs-for-substance-misuse-dmd.csv",
+  column = "code",
+)
+
+### Parenteral opioids
+par_opioid_codes = codelist_from_csv(
+  "codelists/opensafely-opioid-containing-medicines-parenteral-excluding-drugs-for-substance-misuse-dmd.csv",
+  column = "code",
+)
+
+### Rectal opioids
+rec_opioid_codes = codelist_from_csv(
+  "codelists/opensafely-opioid-containing-medicines-rectal-excluding-drugs-for-substance-misuse-dmd.csv",
+  column = "code",
+)
+
+### Transdermal opioids
+trans_opioid_codes = codelist_from_csv(
+  "codelists/opensafely-opioid-containing-medicines-transdermal-excluding-drugs-for-substance-misuse-dmd.csv",
+  column = "code",
 )
 
 
-### rules ###
+### Other opioid
+oth_opioid_codes = (
+  buc_opioid_codes +
+  inh_opioid_codes +
+  rec_opioid_codes
+)
 
-# Pass to the next rule all patients from the specified population who meet both of the criteria below:
-# Have a hypertension diagnosis in the patient record up to and including the achievement date.
-# Latest hypertension diagnosis is not followed by a hypertension resolved code.
-dataset.hyp_reg_r1 = dataset.hyplat_dat.is_not_null() & dataset.hypres_dat.is_null() | (dataset.hyplat_dat > dataset.hypres_dat)
+### Any opioid
+opioid_codes = (
+  buc_opioid_codes +
+  inh_opioid_codes +
+  oral_opioid_codes +
+  par_opioid_codes +
+  rec_opioid_codes +
+  trans_opioid_codes
+)
 
-### defining population ###
-has_registration = practice_registrations.for_patient_on(index_date).exists_for_patient()
-dataset.define_population(
-    (has_registration) & dataset.hyp_reg_r1
-    )
+## Ethnicity
+ethnicity_codes_16 = codelist_from_csv(
+    "codelists/opensafely-ethnicity-snomed-0removed.csv",
+    column="snomedcode",
+    category_column="Grouping_16",
+)
+
+## Ethnicity
+ethnicity_codes_6 = codelist_from_csv(
+    "codelists/opensafely-ethnicity-snomed-0removed.csv",
+    column="snomedcode",
+    category_column="Grouping_6",
+)

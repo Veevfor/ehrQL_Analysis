@@ -1,146 +1,200 @@
-from argparse import ArgumentParser
-import datetime
-from ehrql import create_dataset, case, when
+from ehrql import codelist_from_csv
 
-from ehrql.tables.tpp import (
-    clinical_events,
-    patients,
-    practice_registrations,
-    addresses,
-    appointments,
+covid_icd10_codes = ["U071", "U072", "U109", "U099"]
+
+ethnicity_snomed_codes = codelist_from_csv(
+  "codelists/opensafely-ethnicity-snomed-0removed-2e641f61.csv",
+  column = "snomedcode",
+  category_column="Grouping_6",
 )
 
-from codelists import (
-    f2f_consultation,
-    virtual_consultation,
-    ethnicity_codelist,
+### Solid cancer
+non_haematological_cancer_opensafely_snomed_codes_new = codelist_from_csv(
+  "codelists/user-bangzheng-cancer-excluding-lung-and-haematological-snomed-new.csv",
+  column = "code",
 )
 
-# Get start and end date from project.yaml
-parser = ArgumentParser()
-parser.add_argument("--start-date", type=datetime.date.fromisoformat)
-parser.add_argument("--end-date", type=datetime.date.fromisoformat)
-args = parser.parse_args()
-start_date = args.start_date
-end_date = args.end_date
-
-# Instantiate dataset
-dataset = create_dataset()
-dataset.configure_dummy_data(population_size=5000)
-
-# Extract clinical events that fall between our start and end date
-# for further use in variable definitions below
-selected_events = clinical_events.where(
-    clinical_events.date.is_on_or_between(start_date, end_date)
+lung_cancer_opensafely_snomed_codes = codelist_from_csv(
+  "codelists/opensafely-lung-cancer-snomed.csv", 
+  column = "id"
 )
 
-# Virtual consultations identified through clinical codes
-# Check if a patient has a clinical code in the time period defined
-# above (selected_events) that are in the virtual_consultation codelist
-dataset.has_virtual_consultation = selected_events.where(
-    clinical_events.snomedct_code.is_in(virtual_consultation)
-).exists_for_patient()
-
-# Count number of virtual_consultation that a patient had
-# in the time period defined above (selected_events)
-dataset.count_virtual_consultation = selected_events.where(
-    clinical_events.snomedct_code.is_in(virtual_consultation)
-).count_for_patient()
-
-dataset.last_virtual_consultation_code = (
-    selected_events.where(clinical_events.snomedct_code.is_in(virtual_consultation))
-    .sort_by(clinical_events.date)
-    .last_for_patient()
-    .snomedct_code
+chemotherapy_radiotherapy_opensafely_snomed_codes = codelist_from_csv(
+  "codelists/opensafely-chemotherapy-or-radiotherapy-snomed.csv", 
+  column = "id"
 )
 
-# f2f (face to face) consultations identified through clinical codes
-dataset.has_f2f_consultation = selected_events.where(
-    clinical_events.snomedct_code.is_in(f2f_consultation)
-).exists_for_patient()
+solid_cancer_codes=non_haematological_cancer_opensafely_snomed_codes_new+lung_cancer_opensafely_snomed_codes+chemotherapy_radiotherapy_opensafely_snomed_codes
 
-# Count number of f2f that a patient had
-dataset.count_f2f_consultation = selected_events.where(
-    clinical_events.snomedct_code.is_in(f2f_consultation)
-).count_for_patient()
 
-dataset.last_f2f_consultation_code = (
-    selected_events.where(clinical_events.snomedct_code.is_in(f2f_consultation))
-    .sort_by(clinical_events.date)
-    .last_for_patient()
-    .snomedct_code
+### Patients with a haematological diseases
+haematopoietic_stem_cell_transplant_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-haematopoietic-stem-cell-transplant-snomed.csv", 
+  column = "code"
 )
 
-# Appointments identified through the appointments table
-# Get all appointments with status "Finished"
-appointments_seen = appointments.where(
-    appointments.status.is_in(
-        [
-            "Arrived",
-            "In Progress",
-            "Finished",
-            "Visit",
-            "Waiting",
-            "Patient Walked Out",
-        ]
-    )
-).where(appointments.seen_date.is_on_or_between(start_date, end_date))
-
-dataset.last_appointment_status = (
-    appointments_seen.sort_by(appointments_seen.seen_date).last_for_patient().status
+haematopoietic_stem_cell_transplant_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-haematopoietic-stem-cell-transplant-icd-10.csv", 
+  column = "code"
 )
 
-
-# Count number of total seen appointments in the time period
-dataset.count_appointment = appointments_seen.count_for_patient()
-# Specify if a patient had (True/False) a finished appointment in the time period
-dataset.has_appointment = appointments_seen.exists_for_patient()
-
-# Demographic variables and other patient characteristics
-# Define variable that checks if a patients is registered at the start date
-has_registration = practice_registrations.for_patient_on(
-    start_date
-).exists_for_patient()
-
-dataset.age = patients.age_on(start_date)
-dataset.age_greater_equal_65 = dataset.age >= 65
-
-# Define patient sex and date of death
-dataset.sex = patients.sex
-dataset.dod = patients.date_of_death
-
-# Define patient address: MSOA, rural-urban and IMD rank, using latest data for each patient
-latest_address_per_patient = addresses.sort_by(addresses.start_date).last_for_patient()
-imd_rounded = latest_address_per_patient.imd_rounded
-dataset.imd_quintile = case(
-    when((imd_rounded >= 0) & (imd_rounded < int(32844 * 1 / 5))).then("1"),
-    when(imd_rounded < int(32844 * 2 / 5)).then("2"),
-    when(imd_rounded < int(32844 * 3 / 5)).then("3"),
-    when(imd_rounded < int(32844 * 4 / 5)).then("4"),
-    when(imd_rounded < int(32844 * 5 / 5)).then("5"),
-    otherwise="Missing",
+haematopoietic_stem_cell_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-haematopoietic-stem-cell-transplant-opcs4.csv", 
+  column = "code"
 )
 
-# Define patient ethnicity
-latest_ethnicity_code = (
-    clinical_events.where(clinical_events.snomedct_code.is_in(ethnicity_codelist))
-    .where(clinical_events.date.is_on_or_before(end_date))
-    .sort_by(clinical_events.date)
-    .last_for_patient()
-    .snomedct_code
+haematological_malignancies_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-haematological-malignancies-snomed.csv",
+  column = "code"
 )
 
-latest_ethnicity = latest_ethnicity_code.to_category(ethnicity_codelist)
-
-# Convert ethnicity group numbers into strings
-dataset.ethnicity = case(
-    when(latest_ethnicity == "1").then("White"),
-    when(latest_ethnicity == "2").then("Mixed"),
-    when(latest_ethnicity == "3").then("Asian or Asian British"),
-    when(latest_ethnicity == "4").then("Black or Black British"),
-    when(latest_ethnicity == "5").then("Chinese or Other Ethnic Groups"),
-    otherwise="missing",
+haematological_malignancies_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-haematological-malignancies-icd-10.csv", 
+  column = "code"
 )
 
-# Define population to be registered and above 18 years old
-dataset.define_population(has_registration & (dataset.age >= 18))
+sickle_cell_disease_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-sickle-spl-atriskv4-snomed-ct.csv",
+  column = "code",
+)
+
+sickle_cell_disease_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-sickle-spl-hes-icd-10.csv",
+  column = "code",
+)
+
+### Immune-mediated inflammatory disorders (IMID)
+immunosuppresant_drugs_dmd_codes = codelist_from_csv(
+  "codelists/nhsd-immunosuppresant-drugs-pra-dmd.csv", 
+  column = "code"
+)
+
+oral_steroid_drugs_dmd_codes = codelist_from_csv(
+  "codelists/nhsd-oral-steroid-drugs-pra-dmd.csv",
+  column = "dmd_id",
+)
+
+### Primary immune deficiencies
+immunosupression_nhsd_codes_new = codelist_from_csv(
+  "codelists/user-bangzheng-nhsd-immunosupression-pcdcluster-snomed-ct-new.csv",
+  column = "code",
+)
+
+## Solid organ transplant
+solid_organ_transplant_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-spl-atriskv4-snomed-ct.csv",
+  column = "code",
+)
+solid_organ_transplant_nhsd_snomed_codes_new = codelist_from_csv(
+  "codelists/user-bangzheng-nhsd-transplant-spl-atriskv4-snomed-ct-new.csv",
+  column = "code",
+)
+
+solid_organ_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+thymus_gland_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-thymus-gland-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+replacement_of_organ_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-replacement-of-organ-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+conjunctiva_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-conjunctiva-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+conjunctiva_y_codes_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-conjunctiva-y-codes-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+stomach_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-stomach-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_1_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_1-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_2_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_2-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_1_y_codes_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_1-y-codes-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+ileum_2_y_codes_transplant_nhsd_opcs4_codes = codelist_from_csv(
+  "codelists/nhsd-transplant-ileum_2-y-codes-spl-hes-opcs4.csv", 
+  column = "code"
+)
+
+### Patients with renal disease
+#### CKD stage 5
+ckd_stage_5_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-ckd-stage-5-snomed-ct.csv", 
+  column = "code"
+)
+
+ckd_stage_5_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-ckd-stage-5-icd-10.csv", 
+  column = "code"
+)
+chronic_kidney_disease_stages_3_5_codes = codelist_from_csv(
+    "codelists/primis-covid19-vacc-uptake-ckd35.csv",
+    column="code",
+)
+primis_ckd_stage = codelist_from_csv(
+    "codelists/user-Louis-ckd-stage.csv",
+    column="code",
+    category_column="stage"
+)
+
+### Patients with liver disease
+liver_disease_nhsd_snomed_codes = codelist_from_csv(
+  "codelists/nhsd-liver-cirrhosis.csv", 
+  column = "code"
+)
+
+liver_disease_nhsd_icd10_codes = codelist_from_csv(
+  "codelists/nhsd-liver-cirrhosis-icd-10.csv", 
+  column = "code"
+)
+
+# Chronic cardiac disease
+chronic_cardiac_dis_codes = codelist_from_csv(
+    "codelists/opensafely-chronic-cardiac-disease-snomed.csv",
+    column="id"
+)
+# Chronic respiratory disease
+chronic_respiratory_dis_codes = codelist_from_csv(
+    "codelists/opensafely-chronic-respiratory-disease-snomed.csv",
+    column="id"
+)
+# Diabetes
+diabetes_codes = codelist_from_csv(
+    "codelists/opensafely-diabetes-snomed.csv",
+    column="id"
+)
+# Hypertension
+hypertension_codes = codelist_from_csv(
+    "codelists/opensafely-hypertension-snomed.csv",
+    column="id"
+)
+
+## COVID-19 primary care
+covid_primary_care_positive_test = codelist_from_csv("codelists/opensafely-covid-identification-in-primary-care-probable-covid-positive-test.csv", column="CTV3ID")
+covid_primary_care_code = codelist_from_csv("codelists/opensafely-covid-identification-in-primary-care-probable-covid-clinical-code.csv", column="CTV3ID")
+covid_primary_care_sequelae = codelist_from_csv("codelists/opensafely-covid-identification-in-primary-care-probable-covid-sequelae.csv", column="CTV3ID")
+covid_primary_code = covid_primary_care_positive_test+covid_primary_care_code+covid_primary_care_sequelae
