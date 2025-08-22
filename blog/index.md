@@ -6,7 +6,7 @@ Author: Vivian Okafor
 Categories: OpenSafely, ehrQL
 
 resources:
-  - name: blog-image
+  - name: blog-image (add my own image)
     src: ""
 ---
 Vivian Okafor interned this summer at the Bennett Institute as part of the HDRUK Health Data Science Internship program. During her time here, she researched how ehrQL (the Electronic Health Records Query Language) is used across OpenSAFELY repositories. In this guest blog, she shares insights about her project and findings.
@@ -15,17 +15,17 @@ Vivian Okafor interned this summer at the Bennett Institute as part of the HDRUK
 ehrQL is a query language designed to simplify the process of working with health data. Since its release in December 2023, it has been used in around 65 research projects on OpenSAFELY, an open-source platform that securely supports analysis of over 58 million patient records in England.
 The aim of this project was to understand how researchers are actually using ehrQL by asking:
 
-Which features are used most often?
-Which features are rarely or never used?
-Are any outdated or deprecated features still in use?
-Which features appear in code that is actively tested?
+- Which features are used most often?
+- Which features are rarely or never used?
+- Are any outdated or deprecated features still in use?
+- Which features appear in code that is actively tested?
 
 Understanding these patterns matters because:
 
-The tech team can prioritise which features to improve, simplify, or retire
-Researchers can be guided towards newer, more effective tools
-Training and documentation can be tailored to features that researchers find most challenging
-Feature combinations may reveal gaps where new language functions could be developed.
+- The tech team can prioritise which features to improve, simplify, or retire
+- Researchers can be guided towards newer, more effective tools
+- Training and documentation can be tailored to features that researchers find most challenging
+- Feature combinations may reveal gaps where new language functions could be developed.
 
 ### How?
 I developed a Python script to interact with the GitHub REST API to identify and analyse ehrQL usage across the OpenSAFELY organisation. 
@@ -57,8 +57,30 @@ In my analysis, I reviewed around 65 repositories and 301 Python files containin
 #### Most Popular Features 
 Features like where() (used to filter datasets) and codelist_from_csv() (used to define patient groups) returned the highest counts and are clearly central to researchers’ work. Temporary ones like days(), months(), years(), start_date, and end_date were also common, showing how often studies need to look at data over set time periods. The sort_by() function also returned one of the highest counts.
 
+#### Rarely Used or Unused Features
+Series and frame classes, such as BoolEventSeries(), IntEventSeries(), FloatEventSeries(), EventFrame(), and SortedEventFrame(), were not returned zero count. This may be  because researchers typically query tables directly from the backend rather than defining their own PatientFrames or EventFrames, and they rarely create series from scratch, as these are usually derived from existing tables. The use of PatientFrame in case-control studies is an exception rather than the norm, since researchers need it to generate control groups.
+Helper functions like as_int(), to_first_of_year(), and to_first_of_month() appeared only a few times, indicating that researchers rarely require such fine-grained transformations. 
+The show() function, designed for debugging and development, was used 17 times. This may be because it is intended as a tool for inspecting code, and researchers are unlikely to make GitHub commits when using it.
+
+### What’s Next
+
+This project has given a first look at how ehrQL is used in OpenSAFELY repositories, but there’s plenty more to explore. Future work could link the analysis with job history to reveal not just which features appear in code, but which ones are actually used when run against patient data. This would make it possible to see:
+
+When a repository first (or last) ran ehrQL code.
+
+Which features are most used in active jobs.
+
+Which features are written in code but never run.
+
+How feature use has changed over time.
+
+This kind of deeper analysis could also help the team spot projects that may need support or are still relying on older approaches, while highlighting trends in how ehrQL is adopted and used across the community.
+
+If anyone is interested in this work, please feel free to contact me at bennett@phc.ox.ac.uk
+
 
 
 
 
     
+
