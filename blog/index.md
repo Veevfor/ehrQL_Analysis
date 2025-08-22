@@ -4,18 +4,19 @@ date: 2025-08-22
 
 draft: false
 
-Summary: This blog post shares the project I worked on during my summer internship at the Bennett Institute as part of the HDR UK Health Data Science programme. My project explored how ehrQL, is being used across OpenSAFELY repositories. I analysed code from 65 Repositories under the OpenSafely org. and was able to identified which features researchers rely on most, which are less common, and where improvements or additional support could be valuable.
+Summary: This blog post shares the project I worked on during my summer internship at the Bennett Institute as part of the HDR UK Health Data Science programme. My project explored how ehrQL, is being used across OpenSAFELY repositories. I analysed 301 codefiles from 65 Repositories under the OpenSafely org. and was able to identified which features researchers rely on most, which are less common, and where improvements or additional support could be valuable.
 
-Author: Vivian Okafor
+Author: [Vivian Okafor](https://www.linkedin.com/in/vivo1/)
 
 Categories: OpenSafely, ehrQL
 
 
 ---
-Vivian Okafor interned this summer at the Bennett Institute as part of the HDRUK Health Data Science Internship program. During her time here, she researched how [ehrQL (the Electronic Health Records Query Language)](https://docs.opensafely.org/ehrql/) is used across OpenSAFELY repositories. In this guest blog, she shares insights about her project and findings.
+[Vivian Okafor](https://www.linkedin.com/in/vivo1/) interned this summer at the Bennett Institute as part of the HDRUK Health Data Science Internship program. During her time here, she researched how [ehrQL (the Electronic Health Records Query Language)](https://docs.opensafely.org/ehrql/) is used across OpenSAFELY repositories. In this guest blog, she shares insights about her project and findings.
 
 ### Why:
 ehrQL is a query language designed to simplify the process of working with health data. Since its release in December 2023, it has been used in around 65 research projects on [OpenSAFELY](https://www.bennett.ox.ac.uk/blog/2020/10/what-is-opensafely/), an open-source platform that securely supports analysis of over 58 million patient records in England.
+
 The aim of this project was to understand how researchers are actually using ehrQL by asking:
 
 - Which features are used most often?
@@ -39,6 +40,8 @@ For each matching file, I recorded its file name, file path, GitHub URL, and raw
 
 All identified files were then downloaded locally, with logging and error handling in place to track issues like possible failed requests or encoding errors.
 
+![Workflow Diagram showing the ELT process](ETL_pipeline.PNG)
+
 #### Step 2:  Parsing Files and Counting Features
 Once downloaded, I parsed the Python files to count usage of each ehrQL feature. The process involved:
 - Reading each file with fallback encoding to handle Unicode errors
@@ -58,19 +61,24 @@ To make the findings more accessible, I built an [interactive dashboard using St
 ### The Results 
 In my analysis, I reviewed around 65 repositories and 301 Python files containing ehrQL from across the OpenSAFELY GitHub organisation. I found clear patterns in how ehrQL is being used in practice. This provided a view into  which features researchers use in their code and how these choices shape their workflows.
 
+
+![Frequency of repos that use ehrQL features](Repos.png)
+
 #### Most Popular Features 
-Features like `where()` (used to filter datasets) and `codelist_from_csv()` (used to define patient groups) returned the highest counts. This sjow that they are clearly central to researchers’ work. Temporary ones like `days()`, `months()`, `years()`, `start_date`, and `end_date` were also common, showing how often studies need to look at data over set time periods. The `sort_by()` function also returned one of the highest counts.
+Features like `where()` (used to filter datasets) and `codelist_from_csv()` (used to define patient groups) returned the highest counts. This shows that they are clearly central to researchers’ work. Temporary ones like `days()`, `months()`, `years()`, `start_date`, and `end_date` were also common, showing how often studies need to look at data over set time periods. The `sort_by()` function also returned one of the highest counts.
 
 #### Rarely Used or Unused Features
-Series and frame classes, such as `BoolEventSeries()`, `IntEventSeries()`, `FloatEventSeries()`, `EventFrame()`, and `SortedEventFrame()`, were not returned zero count. This may be  because researchers typically query tables directly from the backend rather than defining their own PatientFrames or EventFrames, and they rarely create series from scratch, as these are usually derived from existing tables. The use of PatientFrame in case-control studies is an exception rather than the norm, since researchers need it to generate control groups.
+Series and frame classes, such as `BoolEventSeries()`, `IntEventSeries()`, `FloatEventSeries()`, `EventFrame()`, and `SortedEventFrame()`, returned zero count. This may be  because researchers typically query tables directly from the backend rather than defining their own `PatientFrames` or `EventFrames`, and they rarely create series from scratch, as these are usually derived from existing tables. The use of `PatientFrame` in case-control studies is an exception rather than the norm, since researchers need it to generate control groups.
 Helper functions like `as_int()`, `to_first_of_year()`, and `to_first_of_month()` appeared only a few times, indicating that researchers rarely require such fine-grained transformations. 
 
-The `show()` function, designed for debugging and development, was used 17 times. This may be because it is intended as a tool for inspecting code, and researchers are unlikely to make GitHub commits when using it. Similarly, The `test_data` which is used to check weather a project is using the assure feature returned 17 counts across repositories, This may suggest that relatively few researchers are running tests on their code which probably means testing is not widely used yet, rather than the feature not being useful.
+![Class and Method Feature Counts](counts.PNG)
+
+The `show()` feature is new and it was designed for debugging and development. It returned 17 counts, this may be because it is intended as a tool for inspecting code, and researchers are unlikely to make GitHub commits when using it. Similarly, The `test_data` which is used to check weather a project is using the assure feature returned 17 counts across repositories. This suggests that few researchers are running tests on their code which probably means testing is not widely used yet, rather than the feature not being useful.
 
 
 ### What’s Next?
 
-This project has given a first look at how ehrQL is used in OpenSAFELY repositories, but there’s plenty more to do. Future work could improve the exisiting script to return better feature usage counts and link the analysis with job history to reveal not just which features appear in code, but which ones are actually used when run against patient data. 
+This project has given a first look at how ehrQL is used in OpenSAFELY repositories, but there’s plenty more to do. Future work could improve the exisiting script to return better feature usage counts. Another recommendation would be to link the analysis with job history to reveal not just which features appear in code, but which ones are actually used when run against patient data. 
 This would make it possible to see:
 
 - When a repository first (or last) ran ehrQL code.
@@ -78,7 +86,7 @@ This would make it possible to see:
 - Which features are written in code but never run.
 - How feature use has changed over time.
 
-A deeper analysis could also help the team spot projects that may need support or are still using deprecated features, while highlighting trends in how ehrQL is adopted and used in resaerch code.
+A deeper analysis could also show projects that may need support or are still using deprecated features, while highlighting trends in how ehrQL is adopted and used in resaerch code.
 
 I have created a [public GitHub repo](https://github.com/Veevfor/ehrQL_Analysis) for this project and if anyone is interested in this work, please feel free to contact me at bennett@phc.ox.ac.uk
 
@@ -87,6 +95,7 @@ I have created a [public GitHub repo](https://github.com/Veevfor/ehrQL_Analysis)
 
 
     
+
 
 
 
