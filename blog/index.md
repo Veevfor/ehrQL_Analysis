@@ -11,10 +11,10 @@ Categories: OpenSafely, ehrQL
 
 
 ---
-Vivian Okafor interned this summer at the Bennett Institute as part of the HDRUK Health Data Science Internship program. During her time here, she researched how ehrQL (the Electronic Health Records Query Language) is used across OpenSAFELY repositories. In this guest blog, she shares insights about her project and findings.
+Vivian Okafor interned this summer at the Bennett Institute as part of the HDRUK Health Data Science Internship program. During her time here, she researched how [ehrQL (the Electronic Health Records Query Language)](https://docs.opensafely.org/ehrql/) is used across OpenSAFELY repositories. In this guest blog, she shares insights about her project and findings.
 
 ### Why:
-ehrQL is a query language designed to simplify the process of working with health data. Since its release in December 2023, it has been used in around 65 research projects on OpenSAFELY, an open-source platform that securely supports analysis of over 58 million patient records in England.
+ehrQL is a query language designed to simplify the process of working with health data. Since its release in December 2023, it has been used in around 65 research projects on [OpenSAFELY](https://www.bennett.ox.ac.uk/blog/2020/10/what-is-opensafely/), an open-source platform that securely supports analysis of over 58 million patient records in England.
 The aim of this project was to understand how researchers are actually using ehrQL by asking:
 
 - Which features are used most often?
@@ -47,8 +47,8 @@ Finally, I summarised the results in two CSV files:
 - Feature counts – total occurrences of each feature across all repositories.
 - Feature-repository map – linking each feature to the repositories where it was used.
   
-### Step 3: Displaying Results on Streamlit 
-To make the findings more accessible, I built an interactive dashboard using Streamlit. The app provides three main views:
+### Step 3: [Displaying Results on Streamlit]
+To make the findings more accessible, I built an [interactive dashboard using Streamlit](https://ehrqlanalysis.streamlit.app/). The app provides three main views:
 
 1. All Repositories: This page displays metadata about the repositories where ehrQL appears, including creation dates and trends over time
 2. Feature Counts: Visualising how frequently each ehrQL class or method is used, presented as interactive barcharts
@@ -74,14 +74,15 @@ This project has given a first look at how ehrQL is used in OpenSAFELY repositor
 - Which features are written in code but never run.
 - How feature use has changed over time.
 
-This kind of deeper analysis could also help the team spot projects that may need support or are still relying on older approaches, while highlighting trends in how ehrQL is adopted and used across the community.
+A deeper analysis could also help the team spot projects that may need support or are still relying on older approaches, while highlighting trends in how ehrQL is adopted and used across the community.
 
-If anyone is interested in this work, please feel free to contact me at bennett@phc.ox.ac.uk
+I have created a [public GitHub repo](https://github.com/Veevfor/ehrQL_Analysis) for this project and If anyone is interested in this work, please feel free to contact me at bennett@phc.ox.ac.uk
 
 
 
 
 
     
+
 
 
