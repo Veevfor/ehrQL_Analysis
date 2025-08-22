@@ -1,0 +1,64 @@
+Title : Understanding ehrQL feature usage in the OpenSAFELY for Health Research
+date: 2025-08-22
+draft: false
+Summary: This blog post shares the project I worked on during my summer internship at the Bennett Institute as part of the HDR UK Health Data Science programme. My project explored how ehrQL, is being used across OpenSAFELY repositories. I analysed code from 65 Repositories under the OpenSafely org. and was able to identified which features researchers rely on most, which are less common, and where improvements or additional support could be valuable.
+Author: Vivian Okafor
+Categories: OpenSafely, ehrQL
+
+resources:
+  - name: blog-image
+    src: ""
+---
+Vivian Okafor interned this summer at the Bennett Institute as part of the HDRUK Health Data Science Internship program. During her time here, she researched how ehrQL (the Electronic Health Records Query Language) is used across OpenSAFELY repositories. In this guest blog, she shares insights about her project and findings.
+
+### Why:
+ehrQL is a query language designed to simplify the process of working with health data. Since its release in December 2023, it has been used in around 65 research projects on OpenSAFELY, an open-source platform that securely supports analysis of over 58 million patient records in England.
+The aim of this project was to understand how researchers are actually using ehrQL by asking:
+
+Which features are used most often?
+Which features are rarely or never used?
+Are any outdated or deprecated features still in use?
+Which features appear in code that is actively tested?
+
+Understanding these patterns matters because:
+
+The tech team can prioritise which features to improve, simplify, or retire
+Researchers can be guided towards newer, more effective tools
+Training and documentation can be tailored to features that researchers find most challenging
+Feature combinations may reveal gaps where new language functions could be developed.
+
+### How?
+I developed a Python script to interact with the GitHub REST API to identify and analyse ehrQL usage across the OpenSAFELY organisation. 
+
+#### Step 1: Extracting the Data
+The first step was to query the GitHub API using the search query:ehrQL language: python org:opensafely to retrieve all repositories under the OpenSAFELY organisation. For each repository, I extracted its name, creation date, and URL. Building on this, I then used the GitHub code search API to locate python files in the repository that contained ehrQL code. 
+For each matching file, I recorded its file name, file path, GitHub URL, and raw download link. I also applied filters to exclude certain repositories (e.g., documentation or tutorials) to keep the focus on research code.
+
+All identified files were then downloaded locally, with logging and error handling in place to track issues like possible failed requests or encoding errors.
+
+#### Step 2:  Parsing Files and Counting Features
+Once downloaded, I parsed the Python files to count usage of each ehrQL feature. The process involved:
+Reading each file with fallback encoding to handle Unicode errors
+Performing a case-insensitive search for all features listed in a reference text file containing ehrQL features
+Counting every instance of a feature and mapping it to the repositories where it appeared.
+Finally, I summarised the results in two CSV files:
+Feature counts – total occurrences of each feature across all repositories.
+Feature-repository map – linking each feature to the repositories where it was used.
+Step 3: Displaying Results on Streamlit 
+To make the findings more accessible, I built an interactive dashboard using Streamlit. The app provides three main views:
+
+All Repositories: This page displays metadata about the repositories where ehrQL appears, including creation dates and trends over time
+Feature Counts: Visualising how frequently each ehrQL class or method is used, presented as interactive barcharts 
+Feature Details: This page allows users to select an individual feature and see which repositories use it.
+
+### The Results 
+In my analysis, I reviewed around 65 repositories and 301 Python files containing ehrQL from across the OpenSAFELY GitHub organisation. I found clear patterns in how ehrQL is being used in practice. This provided a view into  which features researchers use in their code and how these choices shape their workflows.
+
+#### Most Popular Features 
+Features like where() (used to filter datasets) and codelist_from_csv() (used to define patient groups) returned the highest counts and are clearly central to researchers’ work. Temporary ones like days(), months(), years(), start_date, and end_date were also common, showing how often studies need to look at data over set time periods. The sort_by() function also returned one of the highest counts.
+
+
+
+
+
+    
