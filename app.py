@@ -15,8 +15,15 @@ code_files_df = pd.read_csv("Data/opensafely_ehrql_code_files.csv")
 if "Created_on" in repos_df.columns:
     repos_df["Created_on"] = pd.to_datetime(repos_df["Created_on"], errors="coerce") # Ensure datetime conversion
 
+if "feature_selected" not in st.session_state:  #initialising session state
+    st.session_state.feature_selected = None
 
-page = st.sidebar.radio("Select Page:", ["Overview", "All Repositories", "Feature Counts", "Feature Details"]) #sidebar
+if "sort_order" not in st.session_state:
+    st.session_state.sort_order = "Oldest First"
+
+
+
+page = st.sidebar.radio("Content:", ["Overview", "All Repositories", "Feature Counts", "Feature Details"]) #sidebar
 
 
 # PAGE 0: Overview
@@ -46,63 +53,51 @@ if page == "Overview":
     st.metric("Total Unique Features", features_df["Feature"].nunique())
 
 # PAGE 1: All Repositories
-if page == "All Repositories":
+elif page == "All Repositories":
     st.subheader("All Repositories")
-
     st.write(
         """
-        This page provides an overview of repositories that make use of **ehrQL**. Each entry shows the date the repository was first created along with the number of ehrQL code files it contains.  
-
-        The table can be sorted to display either the oldest or the most recent repositories first. This allows trends in ehrQL adoption since inception.  
+        This page provides an overview of repositories that make use of **ehrQL**. Each entry shows the date the repository was first created along with the number of ehrQL code files it contains.
+        The table can be sorted to display either the oldest or the most recent repositories first.
         """
     )
-    # Get earliest creation date per unique repo
-    unique_repos_df = (
-        repos_df.groupby("Repository")["Created_on"]
-        .min()  # each repo's first creation date
-        .reset_index()
-    )
-    repos_by_year = (
-        unique_repos_df.groupby(unique_repos_df['Created_on'].dt.year)
-        .size()
-        .reset_index(name='Count')
-        .rename(columns={'Created_on': 'Year'})
-    )
 
+    # Unique repositories with first creation date
+    unique_repos_df = repos_df.groupby("Repository")["Created_on"].min().reset_index()
+    repo_codefile_counts = repos_df.groupby("Repository").size().reset_index(name="CodeFile Count")
+    unique_repos_df = unique_repos_df.merge(repo_codefile_counts, on="Repository", how="left")
+    unique_repos_df["Year"] = unique_repos_df["Created_on"].dt.year
+
+    # Repos per year chart
+    repos_by_year = unique_repos_df.groupby("Year").size().reset_index(name='Count')
     line_chart = alt.Chart(repos_by_year).mark_line(point=True).encode(
         x='Year:O',
         y='Count:Q',
         tooltip=['Year:O', 'Count:Q']
-    ).properties(
-        width=700,
-        title="Unique Repositories per Year"
-    ).interactive()
-
+    ).properties(width=700, title="Unique Repositories per Year").interactive()
     st.altair_chart(line_chart, use_container_width=True)
-    st.caption ("Line Graph of ehrQL adoption over the years"
+    st.caption("Line Graph of ehrQL adoption over the years")
 
+    # Session state for sort order
+    st.session_state.sort_order = st.radio(
+        "Sort repositories by date:", 
+        ["Oldest First", "Newest First"], 
+        index=0 if st.session_state.sort_order == "Oldest First" else 1
     )
-    st.subheader("Data Frame")
-    repo_codefile_counts = repos_df.groupby("Repository").size().reset_index(name="CodeFile Count")
 
-    unique_repos_df = (
-    repos_df.groupby("Repository")["Created_on"]
-    .min()
-    .reset_index()
-    )
-    unique_repos_df = unique_repos_df.merge(repo_codefile_counts, on="Repository", how="left")
-
-    unique_repos_df["Year"] = unique_repos_df["Created_on"].dt.year
-
-    sort_order = st.radio("Sort repositories by date:", ["Oldest First", "Newest First"])
     repos_sorted = unique_repos_df.sort_values(
-    "Created_on", ascending=(sort_order == "Oldest First")
+        "Created_on", ascending=(st.session_state.sort_order == "Oldest First")
     ).reset_index(drop=True)
 
+    st.subheader("Data Frame")
     st.dataframe(repos_sorted, use_container_width=True)
 
 
 # PAGE 2: Feature Counts
+def new_func(feature_data):
+    feature_data = feature_data.rename(columns={"URL": "Raw URL"})
+    return feature_data
+
 if page == "Feature Counts":
     st.header("ehrQL Feature Counts")
     st.write(
@@ -155,31 +150,32 @@ if page == "Feature Counts":
         """Overall, the data suggests that while some features (such as `where`, `end_date`, and `start_date`) are widely adopted, many remain rarely or never used."""
     )
 
-# PAGE 3: Feature Detail View
+# PAGE 3: Feature Details
 elif page == "Feature Details":
     st.title("Feature Details")
-
-    st.write (
-        """ This page provides a detailed view into how individual ehrQL features across research repositories. Selecting a feature displays the total number of unique repositories that have used it This allows for quick identification of both the prevalence of a feature and the specific code files in which it is implemented."""
+    st.write(
+        "This page provides a detailed view into how individual ehrQL features are used across research repositories."
     )
-    feature_selected = st.selectbox("Select a feature:", feature_repo_df["Feature"].unique())  # Select a feature
 
-    # Filter for the selected feature
+    # Session state for feature selection
+    st.session_state.feature_selected = st.selectbox(
+        "Select a feature:",
+        feature_repo_df["Feature"].unique(),
+        index=0 if st.session_state.feature_selected is None else list(feature_repo_df["Feature"].unique()).index(st.session_state.feature_selected)
+    )
+    feature_selected = st.session_state.feature_selected
+
     feature_data = feature_repo_df[feature_repo_df["Feature"] == feature_selected].copy()
-
-    # Count unique repositories
     unique_repos_count = feature_data["Repository"].nunique()
     st.write(f"**Total unique repositories using this feature:** {unique_repos_count}")
 
-    # Prepare table: Repository and Raw URL
     display_columns = ["Repository"]
     if "URL" in feature_data.columns:
         display_columns.append("URL")
         feature_data = feature_data.rename(columns={"URL": "Raw URL"})
     elif "File" in feature_data.columns:
         display_columns.append("File")
-    
-    display_df = feature_data[display_columns].drop_duplicates().reset_index(drop=True)
 
-    st.subheader("Repositories and Code Files using this Feature")
+    display_df = feature_data[display_columns].drop_duplicates().reset_index(drop=True)
+    st.subheader("Repositories using this Feature")
     st.dataframe(display_df, use_container_width=True)
