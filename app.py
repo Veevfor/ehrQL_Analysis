@@ -62,8 +62,6 @@ if page == "All Repositories":
         .min()  # each repo's first creation date
         .reset_index()
     )
-
-    # Group unique repos by year
     repos_by_year = (
         unique_repos_df.groupby(unique_repos_df['Created_on'].dt.year)
         .size()
@@ -71,7 +69,6 @@ if page == "All Repositories":
         .rename(columns={'Created_on': 'Year'})
     )
 
-    # Line chart for unique repositories per year
     line_chart = alt.Chart(repos_by_year).mark_line(point=True).encode(
         x='Year:O',
         y='Count:Q',
